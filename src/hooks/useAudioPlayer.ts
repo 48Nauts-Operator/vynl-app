@@ -1,0 +1,187 @@
+"use client";
+
+import { useEffect, useRef, useCallback } from "react";
+import { usePlayerStore } from "@/store/player";
+
+export function useAudioPlayer() {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const historyRecorded = useRef(false);
+  const {
+    currentTrack,
+    isPlaying,
+    volume,
+    outputTarget,
+    sonosSpeaker,
+    setCurrentTime,
+    setDuration,
+    setIsPlaying,
+    playNext,
+  } = usePlayerStore();
+
+  // Initialize audio element
+  useEffect(() => {
+    if (!audioRef.current) {
+      audioRef.current = new Audio();
+      audioRef.current.preload = "metadata";
+    }
+    return () => {
+      audioRef.current?.pause();
+    };
+  }, []);
+
+  // Handle track changes
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !currentTrack) return;
+
+    if (outputTarget === "browser" && currentTrack.filePath) {
+      const audioUrl = `/api/audio${currentTrack.filePath}`;
+      audio.src = audioUrl;
+      audio.load();
+      historyRecorded.current = false;
+
+      if (isPlaying) {
+        audio.play().catch(console.error);
+      }
+    } else if (outputTarget === "sonos" && sonosSpeaker) {
+      // Stop browser audio and clear source to prevent error events
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+
+      // Send to Sonos via API
+      const tunifyHost = window.location.origin;
+
+      if (currentTrack.filePath) {
+        fetch("/api/sonos/control", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            speaker: sonosSpeaker,
+            action: "play-uri",
+            uri: `${tunifyHost}/api/audio${currentTrack.filePath}`,
+          }),
+        }).catch(console.error);
+      } else if (currentTrack.sourceId && currentTrack.source === "spotify") {
+        // Spotify tracks are played directly by the caller (discover page, search, etc.)
+        // — not by this hook, to avoid duplicate commands and 500 errors
+      } else if (currentTrack.streamUrl) {
+        fetch("/api/sonos/control", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            speaker: sonosSpeaker,
+            action: "play-uri",
+            uri: currentTrack.streamUrl,
+            isRadio: currentTrack.source === "radio",
+          }),
+        }).catch(console.error);
+      }
+    }
+  }, [currentTrack, outputTarget, sonosSpeaker]);
+
+  // Handle play/pause (user-initiated toggle only)
+  const prevIsPlaying = useRef(isPlaying);
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !currentTrack) return;
+
+    // Skip if isPlaying didn't actually change (e.g. initial render)
+    if (prevIsPlaying.current === isPlaying) return;
+    prevIsPlaying.current = isPlaying;
+
+    if (outputTarget === "browser") {
+      if (isPlaying) {
+        audio.play().catch(console.error);
+      } else {
+        audio.pause();
+      }
+    } else if (outputTarget === "sonos" && sonosSpeaker) {
+      fetch("/api/sonos/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          speaker: sonosSpeaker,
+          action: isPlaying ? "play" : "pause",
+        }),
+      }).catch(console.error);
+    }
+  }, [isPlaying, currentTrack, outputTarget, sonosSpeaker]);
+
+  // Handle volume
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = volume;
+    }
+  }, [volume]);
+
+  // Audio event listeners
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const onTimeUpdate = () => {
+      setCurrentTime(audio.currentTime);
+
+      // Record to history after 30s of playback
+      if (audio.currentTime > 30 && !historyRecorded.current && currentTrack) {
+        historyRecorded.current = true;
+        fetch("/api/library/history", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            trackId: currentTrack.id,
+            trackTitle: currentTrack.title,
+            trackArtist: currentTrack.artist,
+            source: currentTrack.source,
+            duration: currentTrack.duration,
+            listenedDuration: audio.currentTime,
+            outputTarget,
+          }),
+        }).catch(console.error);
+      }
+    };
+
+    const onLoadedMetadata = () => {
+      setDuration(audio.duration);
+    };
+
+    const onEnded = () => {
+      playNext();
+    };
+
+    const onError = () => {
+      // Only stop playback for browser mode — in Sonos mode, HTML5 Audio errors
+      // are expected (no browser source for Spotify/radio tracks)
+      const { outputTarget: currentOutput } = usePlayerStore.getState();
+      if (currentOutput === "browser") {
+        console.error("Audio playback error");
+        setIsPlaying(false);
+      }
+    };
+
+    audio.addEventListener("timeupdate", onTimeUpdate);
+    audio.addEventListener("loadedmetadata", onLoadedMetadata);
+    audio.addEventListener("ended", onEnded);
+    audio.addEventListener("error", onError);
+
+    return () => {
+      audio.removeEventListener("timeupdate", onTimeUpdate);
+      audio.removeEventListener("loadedmetadata", onLoadedMetadata);
+      audio.removeEventListener("ended", onEnded);
+      audio.removeEventListener("error", onError);
+    };
+  }, [currentTrack, outputTarget, setCurrentTime, setDuration, setIsPlaying, playNext]);
+
+  const seek = useCallback(
+    (time: number) => {
+      if (audioRef.current && outputTarget === "browser") {
+        audioRef.current.currentTime = time;
+        setCurrentTime(time);
+      }
+    },
+    [outputTarget, setCurrentTime]
+  );
+
+  return { audioRef, seek };
+}
