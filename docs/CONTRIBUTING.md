@@ -2,7 +2,7 @@
 
 ## Getting Started
 
-1. Fork the repo: `gh repo fork 48Nauts-Operator/tunify`
+1. Fork the repo: `gh repo fork 48Nauts-Operator/vynl-app`
 2. Clone your fork: `git clone git@github.com:<your-user>/tunify.git`
 3. Install dependencies: `npm install`
 4. Copy env: `cp .env.example .env.local` and configure paths
