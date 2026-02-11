@@ -1,27 +1,51 @@
 import { NextRequest, NextResponse } from "next/server";
-import { execFile } from "child_process";
-import { promisify } from "util";
+import { spawn, ChildProcess } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import Database from "better-sqlite3";
-const execFileAsync = promisify(execFile);
 
 const AUDIO_EXTENSIONS = new Set([".mp3", ".m4a", ".flac", ".wav", ".ogg", ".aac", ".wma"]);
+
+const MAX_LOG_LINES = 500;
+
+interface FolderResult {
+  folder: string;
+  success: boolean;
+  tracks?: number;
+  error?: string;
+  cleaned?: boolean;
+  elapsed?: number;
+}
+
+// Track the currently running beet process so we can kill it on cancel
+let activeProcess: ChildProcess | null = null;
 
 // In-memory job state (survives across requests within the same server process)
 let currentJob: {
   id: string;
-  status: "running" | "complete" | "error";
+  status: "running" | "complete" | "error" | "cancelled";
   total: number;
   current: number;
   currentFolder: string;
-  results: Array<{ folder: string; success: boolean; tracks?: number; error?: string }>;
+  results: FolderResult[];
+  logs: string[];
   postProcessing: boolean;
   startedAt: number;
+  folderStartedAt: number;
   completedAt?: number;
   error?: string;
 } | null = null;
+
+/** Append a line to the job log buffer (ring buffer) */
+function log(line: string) {
+  if (!currentJob) return;
+  const ts = new Date().toLocaleTimeString("en-GB", { hour12: false });
+  currentJob.logs.push(`[${ts}] ${line}`);
+  if (currentJob.logs.length > MAX_LOG_LINES) {
+    currentJob.logs = currentJob.logs.slice(-MAX_LOG_LINES);
+  }
+}
 
 function discoverImportFolders(basePath: string): string[] {
   const folders: string[] = [];
@@ -74,6 +98,101 @@ function discoverImportFolders(basePath: string): string[] {
   return [...new Set(folders)];
 }
 
+/** Count audio files in a folder */
+function countAudioFiles(folderPath: string): number {
+  try {
+    const entries = fs.readdirSync(folderPath);
+    return entries.filter((f) => AUDIO_EXTENSIONS.has(path.extname(f).toLowerCase())).length;
+  } catch {
+    return 0;
+  }
+}
+
+/** Run beet import as a spawned process with live log streaming */
+function runBeetImport(args: string[], folder: string): Promise<{ code: number; stderr: string }> {
+  return new Promise((resolve) => {
+    const proc = spawn("beet", args, {
+      timeout: 600000, // 10 min timeout
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    activeProcess = proc;
+
+    // Close stdin immediately so beets never blocks waiting for interactive input (Y/n prompts)
+    proc.stdin.end();
+
+    let stderr = "";
+
+    proc.stdout.on("data", (data: Buffer) => {
+      const lines = data.toString().split("\n").filter(Boolean);
+      for (const line of lines) {
+        const clean = line.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "").replace(/\[[\d;]*m/g, "").trim();
+        if (clean) log(`  ${clean}`);
+      }
+    });
+
+    proc.stderr.on("data", (data: Buffer) => {
+      const text = data.toString();
+      stderr += text;
+      const lines = text.split("\n").filter(Boolean);
+      for (const line of lines) {
+        const clean = line.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "").replace(/\[[\d;]*m/g, "").trim();
+        if (clean) log(`  ⚠ ${clean}`);
+      }
+    });
+
+    proc.on("close", (code) => {
+      activeProcess = null;
+      resolve({ code: code ?? 1, stderr });
+    });
+
+    proc.on("error", (err) => {
+      activeProcess = null;
+      stderr += err.message;
+      log(`  ✗ Process error: ${err.message}`);
+      resolve({ code: 1, stderr });
+    });
+  });
+}
+
+/** Check if a directory is empty (no files, possibly empty subdirs) */
+function isDirectoryEmpty(dirPath: string): boolean {
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isFile()) return false;
+      if (entry.isDirectory()) {
+        if (!isDirectoryEmpty(path.join(dirPath, entry.name))) return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Recursively remove empty directories */
+function removeEmptyDir(dirPath: string): boolean {
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    // First, clean up any empty subdirectories
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        removeEmptyDir(path.join(dirPath, entry.name));
+      }
+    }
+    // Check again after cleaning subdirs
+    const remaining = fs.readdirSync(dirPath);
+    if (remaining.length === 0) {
+      fs.rmdirSync(dirPath);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 /** Run the import in the background — not tied to any HTTP response */
 async function runImportJob(folders: string[]) {
   if (!currentJob) return;
@@ -93,63 +212,144 @@ async function runImportJob(folders: string[]) {
 
   try {
     for (let i = 0; i < folders.length; i++) {
+      // Check for cancellation before starting each folder
+      if (currentJob.status === "cancelled") {
+        log("");
+        log("━━━ CANCELLED by user ━━━");
+        const succeeded = currentJob.results.filter((r) => r.success).length;
+        const failed = currentJob.results.filter((r) => !r.success).length;
+        log(`${succeeded} succeeded, ${failed} failed before cancellation`);
+        currentJob.completedAt = Date.now();
+        currentJob.currentFolder = "";
+        return;
+      }
+
       const folder = folders[i];
       const folderName = path.basename(folder);
+      const audioCount = countAudioFiles(folder);
 
       currentJob.current = i + 1;
       currentJob.currentFolder = folderName;
+      currentJob.folderStartedAt = Date.now();
+
+      log(`━━━ [${i + 1}/${folders.length}] ${folderName} (${audioCount} audio files) ━━━`);
 
       const countBefore = getBeetsCount();
 
       let success = false;
       let importError = "";
 
-      try {
-        await execFileAsync("beet", ["import", "-q", "--move", folder], { timeout: 300000 });
-      } catch (err: unknown) {
-        const e = err as { stderr?: string };
-        importError = e.stderr || String(err);
+      // Attempt 1: auto-tag with MusicBrainz
+      log(`→ beet import -q --move "${folderName}"`);
+      const result1 = await runBeetImport(["import", "-q", "--move", folder], folder);
+
+      if (result1.code !== 0 && result1.stderr) {
+        importError = result1.stderr;
       }
 
       let countAfter = getBeetsCount();
       let tracksImported = countAfter - countBefore;
 
-      if (tracksImported === 0) {
-        try {
-          await execFileAsync("beet", ["import", "--noautotag", "--move", folder], { timeout: 300000 });
-          countAfter = getBeetsCount();
-          tracksImported = countAfter - countBefore;
-        } catch (err: unknown) {
-          const e = err as { stderr?: string };
-          importError = e.stderr || String(err);
+      if (tracksImported > 0) {
+        log(`✓ Auto-tagged: ${tracksImported} tracks imported`);
+      } else {
+        log(`→ Auto-tag found nothing, retrying with --noautotag...`);
+
+        // Attempt 2: import with existing tags
+        const result2 = await runBeetImport(["import", "--noautotag", "--move", folder], folder);
+
+        if (result2.code !== 0 && result2.stderr) {
+          importError = result2.stderr;
+        }
+
+        countAfter = getBeetsCount();
+        tracksImported = countAfter - countBefore;
+
+        if (tracksImported > 0) {
+          log(`✓ Imported with existing tags: ${tracksImported} tracks`);
+        } else {
+          log(`✗ No tracks imported from this folder`);
         }
       }
 
       success = tracksImported > 0;
 
+      // Cleanup: remove source folder if empty after import
+      let cleaned = false;
+      if (success) {
+        if (isDirectoryEmpty(folder)) {
+          cleaned = removeEmptyDir(folder);
+          if (cleaned) {
+            log(`🧹 Cleaned up empty source folder: ${folderName}`);
+          }
+        } else {
+          // Count remaining files
+          try {
+            const remaining = fs.readdirSync(folder).length;
+            log(`⚠ Source folder still has ${remaining} items, not removing`);
+          } catch {
+            // folder may already be gone
+          }
+        }
+      }
+
+      const elapsed = Date.now() - currentJob.folderStartedAt;
+
       currentJob.results.push({
         folder: folderName,
         success,
         tracks: tracksImported > 0 ? tracksImported : undefined,
-        error: !success && importError ? importError.slice(0, 200) : undefined,
+        error: !success && importError ? importError : undefined,
+        cleaned,
+        elapsed,
       });
+
+      log(`── Done in ${(elapsed / 1000).toFixed(1)}s ──`);
     }
 
     // Post-processing
     currentJob.postProcessing = true;
     currentJob.currentFolder = "Post-processing...";
+    log("");
+    log("━━━ Post-processing ━━━");
+    log("→ Scanning library & syncing database...");
 
     const baseUrl = process.env.VYNL_HOST || "http://localhost:3101";
     try {
-      await fetch(`${baseUrl}/api/library/scan?adapter=beets`, { method: "POST" });
-      await fetch(`${baseUrl}/api/library/housekeeping`, {
+      const scanRes = await fetch(`${baseUrl}/api/library/scan?adapter=beets`, { method: "POST" });
+      if (scanRes.ok) {
+        const scanData = await scanRes.json();
+        log(`✓ Library scan: ${scanData.scanned || 0} scanned, ${scanData.added || 0} added`);
+      } else {
+        log(`⚠ Library scan returned ${scanRes.status}`);
+      }
+    } catch (err) {
+      log(`⚠ Library scan failed: ${err}`);
+    }
+
+    log("→ Rescanning cover art...");
+    try {
+      const coverRes = await fetch(`${baseUrl}/api/library/housekeeping`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "rescan-covers" }),
       });
-    } catch {
-      // Best-effort
+      if (coverRes.ok) {
+        log("✓ Cover art rescan complete");
+      } else {
+        log(`⚠ Cover rescan returned ${coverRes.status}`);
+      }
+    } catch (err) {
+      log(`⚠ Cover rescan failed: ${err}`);
     }
+
+    const succeeded = currentJob.results.filter((r) => r.success).length;
+    const failed = currentJob.results.filter((r) => !r.success).length;
+    const totalTracks = currentJob.results.reduce((sum, r) => sum + (r.tracks || 0), 0);
+
+    log("");
+    log(`━━━ COMPLETE ━━━`);
+    log(`${succeeded} succeeded, ${failed} failed, ${totalTracks} total tracks imported`);
 
     currentJob.status = "complete";
     currentJob.postProcessing = false;
@@ -160,6 +360,7 @@ async function runImportJob(folders: string[]) {
       currentJob.status = "error";
       currentJob.error = String(err);
       currentJob.completedAt = Date.now();
+      log(`✗ Fatal error: ${err}`);
     }
   }
 }
@@ -190,6 +391,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Path does not exist" }, { status: 400 });
   }
 
+  // Pre-flight: check that beets library directory is accessible (NAS must be mounted)
+  const beetsDbPath = process.env.BEETS_DB_PATH || path.join(os.homedir(), ".config", "beets", "library.db");
+  const beetsDbDir = path.dirname(beetsDbPath);
+  if (!fs.existsSync(beetsDbDir)) {
+    return NextResponse.json(
+      { error: `Beets database directory not found: ${beetsDbDir}. Is the NAS mounted?` },
+      { status: 503 }
+    );
+  }
+
   const folders = discoverImportFolders(importPath);
 
   if (folders.length === 0) {
@@ -205,9 +416,15 @@ export async function POST(request: NextRequest) {
     current: 0,
     currentFolder: "Starting...",
     results: [],
+    logs: [],
     postProcessing: false,
     startedAt: Date.now(),
+    folderStartedAt: Date.now(),
   };
+
+  log(`Batch import started: ${folders.length} folders`);
+  log(`Source: ${importPath}`);
+  log("");
 
   // Fire and forget — runs in the background
   runImportJob(folders);
@@ -221,13 +438,23 @@ export async function POST(request: NextRequest) {
 }
 
 /** GET — poll for current job status */
-export async function GET() {
+export async function GET(request: NextRequest) {
   if (!currentJob) {
     return NextResponse.json({ status: "idle", message: "No import job running" });
   }
 
   const succeeded = currentJob.results.filter((r) => r.success).length;
   const failed = currentJob.results.filter((r) => !r.success).length;
+
+  // Support log pagination: ?since=N returns logs from index N onward
+  const url = new URL(request.url);
+  const since = parseInt(url.searchParams.get("since") || "0", 10);
+  const logs = currentJob.logs.slice(since);
+
+  // Elapsed time for currently-processing folder
+  const folderElapsed = currentJob.status === "running" && currentJob.folderStartedAt
+    ? Date.now() - currentJob.folderStartedAt
+    : undefined;
 
   return NextResponse.json({
     jobId: currentJob.id,
@@ -239,8 +466,39 @@ export async function GET() {
     succeeded,
     failed,
     results: currentJob.results,
+    logs,
+    logOffset: since,
+    totalLogs: currentJob.logs.length,
+    folderElapsed,
     startedAt: currentJob.startedAt,
     completedAt: currentJob.completedAt,
     error: currentJob.error,
+  });
+}
+
+/** DELETE — cancel the running import job */
+export async function DELETE() {
+  if (!currentJob || currentJob.status !== "running") {
+    return NextResponse.json({ error: "No running import to cancel" }, { status: 400 });
+  }
+
+  // Set the cancelled flag — the import loop checks this between folders
+  currentJob.status = "cancelled";
+  log("⛔ Cancel requested by user");
+
+  // Kill the currently running beet process immediately
+  if (activeProcess) {
+    try {
+      activeProcess.kill("SIGTERM");
+      log("⛔ Killed active beet process");
+    } catch {
+      // Process may have already exited
+    }
+  }
+
+  return NextResponse.json({
+    message: "Import cancellation requested",
+    completed: currentJob.results.length,
+    remaining: currentJob.total - currentJob.results.length,
   });
 }

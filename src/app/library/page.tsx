@@ -29,6 +29,8 @@ import {
   XCircle,
   Circle,
   FolderUp,
+  Ban,
+  ClipboardCopy,
 } from "lucide-react";
 import Image from "next/image";
 import { motion } from "framer-motion";
@@ -58,6 +60,15 @@ interface BatchFolderResult {
   success: boolean;
   tracks?: number;
   error?: string;
+  cleaned?: boolean;
+  elapsed?: number;
+}
+
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const secs = Math.floor(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  return `${Math.floor(secs / 60)}m ${secs % 60}s`;
 }
 
 function ImportTab() {
@@ -73,6 +84,20 @@ function ImportTab() {
   const [batchResults, setBatchResults] = useState<BatchFolderResult[]>([]);
   const [batchSummary, setBatchSummary] = useState<{ total: number; succeeded: number; failed: number } | null>(null);
   const [batchPostProcessing, setBatchPostProcessing] = useState(false);
+  const [batchLogs, setBatchLogs] = useState<string[]>([]);
+  const [logOffset, setLogOffset] = useState(0);
+  const [folderElapsed, setFolderElapsed] = useState<number | undefined>();
+  const [showLogs, setShowLogs] = useState(true);
+  const [expandedError, setExpandedError] = useState<number | null>(null);
+  const [copiedLogs, setCopiedLogs] = useState(false);
+  const logEndRef = React.useRef<HTMLDivElement>(null);
+
+  // Auto-scroll logs to bottom
+  useEffect(() => {
+    if (showLogs && logEndRef.current) {
+      logEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [batchLogs, showLogs]);
 
   const handleImport = async () => {
     if (!importPath.trim()) return;
@@ -93,12 +118,14 @@ function ImportTab() {
     }
   };
 
-  // Poll for batch import status
+  // Poll for batch import status with incremental log fetching
   useEffect(() => {
     if (!batchImporting) return;
+    let currentOffset = logOffset;
+
     const interval = setInterval(async () => {
       try {
-        const res = await fetch("/api/library/import/batch");
+        const res = await fetch(`/api/library/import/batch?since=${currentOffset}`);
         const data = await res.json();
         if (data.status === "idle") return;
 
@@ -107,8 +134,16 @@ function ImportTab() {
         setBatchCurrentFolder(data.currentFolder || "");
         setBatchResults(data.results || []);
         setBatchPostProcessing(data.postProcessing || false);
+        setFolderElapsed(data.folderElapsed);
 
-        if (data.status === "complete") {
+        // Append new log lines incrementally
+        if (data.logs && data.logs.length > 0) {
+          setBatchLogs((prev) => [...prev, ...data.logs]);
+          currentOffset = data.totalLogs;
+          setLogOffset(data.totalLogs);
+        }
+
+        if (data.status === "complete" || data.status === "cancelled") {
           setBatchSummary({
             total: data.total,
             succeeded: data.succeeded,
@@ -122,13 +157,13 @@ function ImportTab() {
       } catch {
         // Poll error, will retry
       }
-    }, 2000);
+    }, 1500);
     return () => clearInterval(interval);
   }, [batchImporting]);
 
   // On mount, check if an import is already running
   useEffect(() => {
-    fetch("/api/library/import/batch")
+    fetch("/api/library/import/batch?since=0")
       .then((r) => r.json())
       .then((data) => {
         if (data.status === "running") {
@@ -138,6 +173,10 @@ function ImportTab() {
           setBatchCurrentFolder(data.currentFolder || "");
           setBatchResults(data.results || []);
           setBatchPostProcessing(data.postProcessing || false);
+          if (data.logs) {
+            setBatchLogs(data.logs);
+            setLogOffset(data.totalLogs || 0);
+          }
         }
       })
       .catch(() => {});
@@ -151,6 +190,9 @@ function ImportTab() {
     setBatchCurrent(0);
     setBatchTotal(0);
     setBatchPostProcessing(false);
+    setBatchLogs([]);
+    setLogOffset(0);
+    setFolderElapsed(undefined);
 
     try {
       const res = await fetch("/api/library/import/batch", {
@@ -172,6 +214,14 @@ function ImportTab() {
     } catch (err) {
       setResult({ error: String(err) });
       setBatchImporting(false);
+    }
+  };
+
+  const handleCancelImport = async () => {
+    try {
+      await fetch("/api/library/import/batch", { method: "DELETE" });
+    } catch {
+      // Best effort
     }
   };
 
@@ -296,16 +346,34 @@ function ImportTab() {
           <CardContent className="p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold">Batch Import</h3>
-              {batchImporting && (
-                <Badge variant="outline" className="text-xs">
-                  {batchPostProcessing
-                    ? "Post-processing..."
-                    : `Importing ${batchCurrent}/${batchTotal} folders`}
-                </Badge>
-              )}
-              {batchSummary && !batchImporting && (
-                <Badge variant="default" className="text-xs">Complete</Badge>
-              )}
+              <div className="flex items-center gap-2">
+                {batchImporting && folderElapsed !== undefined && (
+                  <span className="text-xs text-muted-foreground font-mono">
+                    {formatElapsed(folderElapsed)}
+                  </span>
+                )}
+                {batchImporting && (
+                  <>
+                    <Badge variant="outline" className="text-xs">
+                      {batchPostProcessing
+                        ? "Post-processing..."
+                        : `Importing ${batchCurrent}/${batchTotal} folders`}
+                    </Badge>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleCancelImport}
+                      className="h-7 px-2 text-red-400 hover:text-red-300 hover:bg-red-950/30"
+                    >
+                      <Ban className="h-3.5 w-3.5 mr-1" />
+                      Cancel
+                    </Button>
+                  </>
+                )}
+                {batchSummary && !batchImporting && (
+                  <Badge variant="default" className="text-xs">Complete</Badge>
+                )}
+              </div>
             </div>
 
             {/* Progress bar */}
@@ -321,29 +389,44 @@ function ImportTab() {
 
             {/* Folder results list */}
             {batchResults.length > 0 && (
-              <div className="max-h-64 overflow-y-auto space-y-1">
+              <div className="max-h-48 overflow-y-auto space-y-1">
                 {batchResults.map((r, i) => (
-                  <div
-                    key={i}
-                    className="flex items-center gap-2 py-1 text-sm"
-                  >
-                    {r.success ? (
-                      <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
-                    ) : (
-                      <XCircle className="h-4 w-4 text-red-500 shrink-0" />
-                    )}
-                    <span className={r.success ? "" : "text-muted-foreground"}>
-                      {r.folder}
-                    </span>
-                    {r.tracks && (
-                      <span className="text-xs text-muted-foreground">
-                        ({r.tracks} tracks)
+                  <div key={i} className="py-1 text-sm">
+                    <div className="flex items-center gap-2">
+                      {r.success ? (
+                        <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+                      ) : (
+                        <XCircle className="h-4 w-4 text-red-500 shrink-0" />
+                      )}
+                      <span className={r.success ? "" : "text-muted-foreground"}>
+                        {r.folder}
                       </span>
-                    )}
-                    {r.error && (
-                      <span className="text-xs text-red-400 truncate">
-                        — {r.error}
-                      </span>
+                      {r.tracks && (
+                        <span className="text-xs text-muted-foreground">
+                          ({r.tracks} tracks)
+                        </span>
+                      )}
+                      {r.cleaned && (
+                        <span className="text-xs text-green-400/70">cleaned</span>
+                      )}
+                      {r.elapsed !== undefined && (
+                        <span className="text-xs text-muted-foreground font-mono ml-auto">
+                          {formatElapsed(r.elapsed)}
+                        </span>
+                      )}
+                      {r.error && !r.success && (
+                        <button
+                          onClick={() => setExpandedError(expandedError === i ? null : i)}
+                          className="text-xs text-red-400 hover:text-red-300 ml-1"
+                        >
+                          {expandedError === i ? "hide error" : "show error"}
+                        </button>
+                      )}
+                    </div>
+                    {r.error && expandedError === i && (
+                      <pre className="text-xs text-red-400/80 whitespace-pre-wrap mt-1 ml-6 p-2 rounded bg-red-950/20 font-mono max-h-32 overflow-y-auto">
+                        {r.error}
+                      </pre>
                     )}
                   </div>
                 ))}
@@ -352,6 +435,11 @@ function ImportTab() {
                   <div className="flex items-center gap-2 py-1 text-sm">
                     <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
                     <span className="text-muted-foreground">{batchCurrentFolder}...</span>
+                    {folderElapsed !== undefined && (
+                      <span className="text-xs text-muted-foreground font-mono ml-auto">
+                        {formatElapsed(folderElapsed)}
+                      </span>
+                    )}
                   </div>
                 )}
                 {/* Remaining folders */}
@@ -359,6 +447,70 @@ function ImportTab() {
                   <div className="flex items-center gap-2 py-1 text-sm text-muted-foreground">
                     <Circle className="h-4 w-4 shrink-0" />
                     <span>Remaining: {batchTotal - batchCurrent} folders</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Live Log Panel */}
+            {(batchLogs.length > 0 || batchImporting) && (
+              <div className="border-t border-border pt-3">
+                <div className="flex items-center justify-between mb-2">
+                  <button
+                    onClick={() => setShowLogs(!showLogs)}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                  >
+                    <span className={`transition-transform ${showLogs ? "rotate-90" : ""}`}>▶</span>
+                    Live Output ({batchLogs.length} lines)
+                  </button>
+                  <div className="flex items-center gap-2">
+                    {batchLogs.length > 0 && (
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(batchLogs.join("\n"));
+                          setCopiedLogs(true);
+                          setTimeout(() => setCopiedLogs(false), 1500);
+                        }}
+                        className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                        title="Copy logs to clipboard"
+                      >
+                        {copiedLogs ? (
+                          <CheckCircle2 className="h-3.5 w-3.5 text-green-400" />
+                        ) : (
+                          <ClipboardCopy className="h-3.5 w-3.5" />
+                        )}
+                        {copiedLogs ? "Copied" : "Copy"}
+                      </button>
+                    )}
+                    {batchImporting && (
+                      <span className="flex items-center gap-1 text-xs text-green-400">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                        live
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {showLogs && (
+                  <div className="bg-black/40 rounded-lg p-3 max-h-72 overflow-y-auto font-mono text-xs leading-relaxed">
+                    {batchLogs.map((line, i) => (
+                      <div
+                        key={i}
+                        className={
+                          line.includes("✗") || line.includes("⚠")
+                            ? "text-red-400/80"
+                            : line.includes("✓")
+                            ? "text-green-400/80"
+                            : line.includes("━━━")
+                            ? "text-foreground font-semibold"
+                            : line.includes("→")
+                            ? "text-blue-400/70"
+                            : "text-muted-foreground"
+                        }
+                      >
+                        {line}
+                      </div>
+                    ))}
+                    <div ref={logEndRef} />
                   </div>
                 )}
               </div>

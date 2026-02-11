@@ -37,9 +37,12 @@ import {
   Merge,
   AlertTriangle,
   FileX2,
+  ToggleLeft,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatFileSize } from "@/lib/utils";
+import { Switch } from "@/components/ui/switch";
+import { useSettingsStore, type FeatureFlags } from "@/store/settings";
 
 interface AlbumRule {
   id: number;
@@ -246,6 +249,21 @@ export default function SettingsPage() {
     setTimeout(() => setSaved(false), 2000);
   };
 
+  const { features, toggleFeature } = useSettingsStore();
+
+  const featureConfig: Array<{
+    key: keyof FeatureFlags;
+    label: string;
+    description: string;
+  }> = [
+    { key: "podcasts", label: "Podcasts", description: "RSS feeds, episode downloads, and Fabric AI analysis" },
+    { key: "youtube", label: "YouTube", description: "Download videos/audio, extract transcripts with Fabric AI" },
+    { key: "partyMode", label: "Party Mode", description: "Full-screen lyrics display with visualizer" },
+    { key: "discover", label: "Discover", description: "AI-powered music recommendations" },
+    { key: "tasteProfile", label: "Taste Profile", description: "Listening habits and music preferences analysis" },
+    { key: "playlists", label: "Playlists", description: "Create and manage custom playlists" },
+  ];
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -258,6 +276,35 @@ export default function SettingsPage() {
           Configure your Vynl instance
         </p>
       </div>
+
+      {/* Feature Toggles */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ToggleLeft className="h-5 w-5" />
+            Features
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3">
+            {featureConfig.map((feat) => (
+              <div
+                key={feat.key}
+                className="flex items-center justify-between p-3 rounded-lg bg-secondary/10 border border-border"
+              >
+                <div className="min-w-0 mr-4">
+                  <p className="text-sm font-medium">{feat.label}</p>
+                  <p className="text-xs text-muted-foreground">{feat.description}</p>
+                </div>
+                <Switch
+                  checked={features[feat.key]}
+                  onCheckedChange={() => toggleFeature(feat.key)}
+                />
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

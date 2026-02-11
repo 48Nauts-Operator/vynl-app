@@ -21,23 +21,31 @@ import {
   FolderInput,
   PartyPopper,
   Podcast,
+  Youtube,
 } from "lucide-react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
+import { useSettingsStore, type FeatureFlags } from "@/store/settings";
 
-const navItems = [
+const navItems: Array<{
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  featureKey?: keyof FeatureFlags;
+}> = [
   { href: "/", label: "Home", icon: Home },
   { href: "/library", label: "Library", icon: Library },
   { href: "/albums", label: "Albums", icon: Disc3 },
   { href: "/artists", label: "Artists", icon: Mic2 },
-  { href: "/discover", label: "Discover", icon: Compass },
-  { href: "/playlists", label: "Playlists", icon: ListMusic },
-  { href: "/podcasts", label: "Podcasts", icon: Podcast },
-  { href: "/party", label: "Party Mode", icon: PartyPopper },
-  { href: "/profile", label: "Taste Profile", icon: User },
+  { href: "/discover", label: "Discover", icon: Compass, featureKey: "discover" },
+  { href: "/playlists", label: "Playlists", icon: ListMusic, featureKey: "playlists" },
+  { href: "/podcasts", label: "Podcasts", icon: Podcast, featureKey: "podcasts" },
+  { href: "/youtube", label: "YouTube", icon: Youtube, featureKey: "youtube" },
+  { href: "/party", label: "Party Mode", icon: PartyPopper, featureKey: "partyMode" },
+  { href: "/profile", label: "Taste Profile", icon: User, featureKey: "tasteProfile" },
   { href: "/speakers", label: "Speakers", icon: Speaker },
   { href: "/settings", label: "Settings", icon: Settings },
   { href: "/about", label: "About", icon: Info },
@@ -84,11 +92,16 @@ export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const importJob = useImportStatus();
+  const features = useSettingsStore((s) => s.features);
   const isImporting = importJob.status === "running";
   const importProgress =
     isImporting && importJob.total
       ? Math.round(((importJob.current || 0) / importJob.total) * 100)
       : 0;
+
+  const visibleNavItems = navItems.filter(
+    (item) => !item.featureKey || features[item.featureKey]
+  );
 
   return (
     <div
@@ -116,7 +129,7 @@ export function Sidebar() {
 
       <ScrollArea className="flex-1 px-2 py-3">
         <nav className="flex flex-col gap-1">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const isActive =
               pathname === item.href ||
               (item.href !== "/" && pathname.startsWith(item.href));
