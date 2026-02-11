@@ -1,0 +1,35 @@
+services:
+  vynl:
+    build: .
+    container_name: vynl
+    restart: unless-stopped
+    ports:
+      - "3101:3101"
+    # Use host network if Sonos speakers need to reach the container directly.
+    # Uncomment the line below and remove the 'ports' section above:
+    # network_mode: host
+    volumes:
+      # Music library (NAS mount or local path)
+      - ${MUSIC_LIBRARY_PATH:-/mnt/music}/library:/music/library
+      # Beets database
+      - ${MUSIC_LIBRARY_PATH:-/mnt/music}/library.db:/music/library.db
+      # Podcast storage
+      - ${MUSIC_LIBRARY_PATH:-/mnt/music}/podcasts:/music/podcasts
+      # Persistent app data (SQLite DB, covers cache)
+      - vynl-data:/app/data
+      - vynl-covers:/app/public/covers
+      # Beets config (optional — mount your existing config)
+      - ${BEETS_CONFIG:-./beets-config.yaml}:/home/vynl/.config/beets/config.yaml:ro
+    environment:
+      - MUSIC_LIBRARY_PATH=/music/library
+      - BEETS_DB_PATH=/music/library.db
+      - PODCAST_STORAGE_PATH=/music/podcasts
+      - VYNL_HOST=http://${HOST_IP:-localhost}:3101
+      - NEXT_PUBLIC_VYNL_HOST=http://${HOST_IP:-localhost}:3101
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID:-}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET:-}
+
+volumes:
+  vynl-data:
+  vynl-covers:

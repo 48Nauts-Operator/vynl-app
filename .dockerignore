@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.gitignore
+*.md
+docs/
+logs/
+.env*.local
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+public/covers/
+.DS_Store
+.archive/
+old_project/

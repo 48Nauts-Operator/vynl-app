@@ -130,6 +130,30 @@ Open [http://localhost:3101](http://localhost:3101)
 - Optional: **Whisper** for podcast transcription
 - Optional: **Fabric** for AI podcast analysis
 
+### Docker
+
+Run Vynl in a container with your music library mounted:
+
+```bash
+# Copy and edit the env file
+cp .env.example .env
+
+# Build and start
+docker compose up -d
+```
+
+Configure your `.env` with your LAN IP and music path:
+
+```env
+HOST_IP=192.168.1.100
+MUSIC_LIBRARY_PATH=/mnt/nas/music
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+The Docker image (~200MB) includes Beets and FFmpeg. For Sonos on the same network, you may need host networking — uncomment `network_mode: host` in `docker-compose.yml`.
+
+> **Note:** Whisper and Fabric AI for podcast transcription/analysis are not yet available in Docker. These features require a native install for now and are planned for a future Docker release.
+
 ## Architecture
 
 ```
