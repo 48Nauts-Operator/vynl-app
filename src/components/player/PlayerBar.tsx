@@ -31,12 +31,32 @@ import {
   Speaker,
   Monitor,
   Music,
+  Headphones,
+  Laptop,
+  Airplay,
+  Cable,
+  Check,
 } from "lucide-react";
 
 interface SonosSpeakerInfo {
   name: string;
   ip: string;
 }
+
+interface AudioDeviceInfo {
+  name: string;
+  type: string;
+  isCurrent: boolean;
+}
+
+const deviceIconMap: Record<string, React.ElementType> = {
+  bluetooth: Headphones,
+  builtin: Laptop,
+  monitor: Monitor,
+  airplay: Airplay,
+  virtual: Cable,
+  other: Speaker,
+};
 
 export function PlayerBar() {
   const {
@@ -47,6 +67,7 @@ export function PlayerBar() {
     volume,
     outputTarget,
     sonosSpeaker,
+    systemDevice,
     shuffled,
     repeatMode,
     togglePlay,
@@ -55,6 +76,7 @@ export function PlayerBar() {
     setVolume,
     setOutputTarget,
     setSonosSpeaker,
+    setSystemDevice,
     toggleShuffle,
     cycleRepeat,
   } = usePlayerStore();
@@ -63,20 +85,62 @@ export function PlayerBar() {
   useKeyboardShortcuts();
 
   const [speakers, setSpeakers] = useState<SonosSpeakerInfo[]>([]);
+  const [audioDevices, setAudioDevices] = useState<AudioDeviceInfo[]>([]);
 
-  // Fetch Sonos speakers
   useEffect(() => {
     fetch("/api/sonos/speakers")
       .then((r) => r.json())
       .then((data) => setSpeakers(data.speakers || []))
       .catch(() => {});
+
+    fetch("/api/audio-devices")
+      .then((r) => r.json())
+      .then((data) => setAudioDevices(data.devices || []))
+      .catch(() => {});
   }, []);
+
+  const handleSwitchAudioDevice = async (deviceName: string) => {
+    try {
+      const res = await fetch("/api/audio-devices/switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device: deviceName }),
+      });
+      const data = await res.json();
+      if (data.switched) {
+        setOutputTarget("browser");
+        setSonosSpeaker(null);
+        setSystemDevice(data.device);
+        // Refresh device list to update isCurrent
+        const refreshRes = await fetch("/api/audio-devices");
+        const refreshData = await refreshRes.json();
+        setAudioDevices(refreshData.devices || []);
+      }
+    } catch {}
+  };
 
   const VolumeIcon =
     volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
 
+  // Determine which icon to show for the output button
+  const getOutputIcon = () => {
+    if (outputTarget === "sonos") return Speaker;
+    if (systemDevice) {
+      const device = audioDevices.find((d) => d.name === systemDevice);
+      if (device) return deviceIconMap[device.type] || Monitor;
+    }
+    return Monitor;
+  };
+  const OutputIcon = getOutputIcon();
+
+  // Label shown next to output icon
+  const outputLabel =
+    outputTarget === "sonos"
+      ? sonosSpeaker
+      : systemDevice || "This Device";
+
   return (
-    <div className="h-[90px] bg-[#181818] border-t border-border flex items-center px-4 gap-4">
+    <div className="h-[90px] bg-[#181818] border-t border-border flex items-center px-4 gap-4" style={{ "--color-primary": "var(--color-player-green)", "--color-primary-foreground": "#000000" } as React.CSSProperties}>
       {/* Left: Now Playing */}
       <div className="flex items-center gap-3 w-[280px] min-w-[180px]">
         {currentTrack ? (
@@ -192,51 +256,92 @@ export function PlayerBar() {
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
-              size="icon"
+              size="sm"
               className={cn(
-                "h-8 w-8",
+                "h-8 gap-1.5 px-2 max-w-[140px]",
                 outputTarget === "sonos" && "text-primary"
               )}
             >
-              {outputTarget === "sonos" ? (
-                <Speaker className="h-4 w-4" />
-              ) : (
-                <Monitor className="h-4 w-4" />
-              )}
+              <OutputIcon className="h-4 w-4 shrink-0" />
+              <span className="text-xs truncate">{outputLabel}</span>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuContent align="end" className="w-60">
             <DropdownMenuLabel>Output Device</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={() => {
-                setOutputTarget("browser");
-                setSonosSpeaker(null);
-              }}
-              className={cn(outputTarget === "browser" && "text-primary")}
-            >
-              <Monitor className="h-4 w-4 mr-2" />
-              This Device
-            </DropdownMenuItem>
+
+            {/* System Audio Devices */}
+            {audioDevices.length > 0 && (
+              <>
+                <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">
+                  System Audio
+                </DropdownMenuLabel>
+                {audioDevices.map((d, i) => {
+                  const Icon = deviceIconMap[d.type] || Speaker;
+                  const isActive =
+                    outputTarget === "browser" && systemDevice === d.name;
+                  return (
+                    <DropdownMenuItem
+                      key={`${d.name}-${i}`}
+                      onClick={() => handleSwitchAudioDevice(d.name)}
+                      className={cn(isActive && "text-primary")}
+                    >
+                      <Icon className="h-4 w-4 mr-2 shrink-0" />
+                      <span className="truncate">{d.name}</span>
+                      {isActive && (
+                        <Check className="h-3 w-3 ml-auto shrink-0" />
+                      )}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </>
+            )}
+
+            {/* Fallback "This Device" if no audio devices found */}
+            {audioDevices.length === 0 && (
+              <DropdownMenuItem
+                onClick={() => {
+                  setOutputTarget("browser");
+                  setSonosSpeaker(null);
+                  setSystemDevice(null);
+                }}
+                className={cn(
+                  outputTarget === "browser" && !systemDevice && "text-primary"
+                )}
+              >
+                <Monitor className="h-4 w-4 mr-2" />
+                This Device
+              </DropdownMenuItem>
+            )}
+
+            {/* Sonos Speakers */}
             {speakers.length > 0 && (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuLabel>Sonos Speakers</DropdownMenuLabel>
-                {speakers.map((s) => (
-                  <DropdownMenuItem
-                    key={s.name}
-                    onClick={() => {
-                      setOutputTarget("sonos");
-                      setSonosSpeaker(s.name);
-                    }}
-                    className={cn(
-                      sonosSpeaker === s.name && "text-primary"
-                    )}
-                  >
-                    <Speaker className="h-4 w-4 mr-2" />
-                    {s.name}
-                  </DropdownMenuItem>
-                ))}
+                <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">
+                  Sonos Speakers
+                </DropdownMenuLabel>
+                {speakers.map((s) => {
+                  const isActive =
+                    outputTarget === "sonos" && sonosSpeaker === s.name;
+                  return (
+                    <DropdownMenuItem
+                      key={s.name}
+                      onClick={() => {
+                        setOutputTarget("sonos");
+                        setSonosSpeaker(s.name);
+                        setSystemDevice(null);
+                      }}
+                      className={cn(isActive && "text-primary")}
+                    >
+                      <Speaker className="h-4 w-4 mr-2 shrink-0" />
+                      <span className="truncate">{s.name}</span>
+                      {isActive && (
+                        <Check className="h-3 w-3 ml-auto shrink-0" />
+                      )}
+                    </DropdownMenuItem>
+                  );
+                })}
               </>
             )}
           </DropdownMenuContent>

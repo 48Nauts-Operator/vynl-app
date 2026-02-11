@@ -27,6 +27,7 @@ interface PlayerState {
   volume: number;
   outputTarget: OutputTarget;
   sonosSpeaker: string | null;
+  systemDevice: string | null;
   shuffled: boolean;
   repeatMode: "off" | "all" | "one";
 
@@ -42,6 +43,7 @@ interface PlayerState {
   setVolume: (volume: number) => void;
   setOutputTarget: (target: OutputTarget) => void;
   setSonosSpeaker: (speaker: string | null) => void;
+  setSystemDevice: (device: string | null) => void;
   toggleShuffle: () => void;
   cycleRepeat: () => void;
 }
@@ -56,6 +58,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   volume: 0.7,
   outputTarget: "sonos",
   sonosSpeaker: "Office",
+  systemDevice: null,
   shuffled: false,
   repeatMode: "off",
 
@@ -127,6 +130,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   setVolume: (volume) => set({ volume }),
   setOutputTarget: (target) => set({ outputTarget: target }),
   setSonosSpeaker: (speaker) => set({ sonosSpeaker: speaker }),
+  setSystemDevice: (device) => set({ systemDevice: device }),
   toggleShuffle: () => set((state) => ({ shuffled: !state.shuffled })),
   cycleRepeat: () =>
     set((state) => ({

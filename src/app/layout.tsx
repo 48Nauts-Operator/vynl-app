@@ -3,7 +3,7 @@ import "./globals.css";
 import { AppShell } from "@/components/layout/AppShell";
 
 export const metadata: Metadata = {
-  title: "Tunify",
+  title: "Vynl",
   description: "AI-Powered Music Discovery & Playback",
 };
 

@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
     try {
       const radioResponse = await fetch(
         `https://de1.api.radio-browser.info/json/stations/byname/${encodeURIComponent(query)}?limit=10`,
-        { headers: { "User-Agent": "Tunify/1.0" } }
+        { headers: { "User-Agent": "Vynl/1.0" } }
       );
       if (radioResponse.ok) {
         const stations = await radioResponse.json();

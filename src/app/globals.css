@@ -9,19 +9,20 @@
   --color-card-foreground: #ffffff;
   --color-popover: #1a1a1a;
   --color-popover-foreground: #ffffff;
-  --color-primary: #1DB954;
-  --color-primary-foreground: #000000;
+  --color-primary: #a855f7;
+  --color-primary-foreground: #ffffff;
   --color-secondary: #282828;
   --color-secondary-foreground: #ffffff;
   --color-muted: #282828;
   --color-muted-foreground: #a1a1a1;
-  --color-accent: #1DB954;
+  --color-accent: #22d3ee;
   --color-accent-foreground: #000000;
   --color-destructive: #ef4444;
   --color-destructive-foreground: #ffffff;
   --color-border: #333333;
   --color-input: #333333;
-  --color-ring: #1DB954;
+  --color-ring: #a855f7;
+  --color-player-green: #1DB954;
   --color-surface: #181818;
   --radius: 0.5rem;
 }

@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { usePlayerStore, Track as PlayerTrack } from "@/store/player";
 import { Track as DBTrack } from "@/lib/db/schema";
+import { Progress } from "@/components/ui/progress";
 import {
   Search,
   Play,
@@ -24,6 +25,10 @@ import {
   Trash2,
   FileCheck,
   ImageIcon,
+  CheckCircle2,
+  XCircle,
+  Circle,
+  FolderUp,
 } from "lucide-react";
 import Image from "next/image";
 import { motion } from "framer-motion";
@@ -42,11 +47,32 @@ function dbToPlayerTrack(t: DBTrack): PlayerTrack {
   };
 }
 
+// Strip ANSI escape codes from beet output
+function stripAnsi(str: string): string {
+  return str.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "").replace(/\[[\d;]*m/g, "");
+}
+
 // ---- Import Tab ----
+interface BatchFolderResult {
+  folder: string;
+  success: boolean;
+  tracks?: number;
+  error?: string;
+}
+
 function ImportTab() {
   const [importPath, setImportPath] = useState("");
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<any>(null);
+
+  // Batch import state
+  const [batchImporting, setBatchImporting] = useState(false);
+  const [batchTotal, setBatchTotal] = useState(0);
+  const [batchCurrent, setBatchCurrent] = useState(0);
+  const [batchCurrentFolder, setBatchCurrentFolder] = useState("");
+  const [batchResults, setBatchResults] = useState<BatchFolderResult[]>([]);
+  const [batchSummary, setBatchSummary] = useState<{ total: number; succeeded: number; failed: number } | null>(null);
+  const [batchPostProcessing, setBatchPostProcessing] = useState(false);
 
   const handleImport = async () => {
     if (!importPath.trim()) return;
@@ -67,56 +93,299 @@ function ImportTab() {
     }
   };
 
+  // Poll for batch import status
+  useEffect(() => {
+    if (!batchImporting) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch("/api/library/import/batch");
+        const data = await res.json();
+        if (data.status === "idle") return;
+
+        setBatchTotal(data.total || 0);
+        setBatchCurrent(data.current || 0);
+        setBatchCurrentFolder(data.currentFolder || "");
+        setBatchResults(data.results || []);
+        setBatchPostProcessing(data.postProcessing || false);
+
+        if (data.status === "complete") {
+          setBatchSummary({
+            total: data.total,
+            succeeded: data.succeeded,
+            failed: data.failed,
+          });
+          setBatchImporting(false);
+        } else if (data.status === "error") {
+          setResult({ error: data.error || "Import failed" });
+          setBatchImporting(false);
+        }
+      } catch {
+        // Poll error, will retry
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [batchImporting]);
+
+  // On mount, check if an import is already running
+  useEffect(() => {
+    fetch("/api/library/import/batch")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.status === "running") {
+          setBatchImporting(true);
+          setBatchTotal(data.total || 0);
+          setBatchCurrent(data.current || 0);
+          setBatchCurrentFolder(data.currentFolder || "");
+          setBatchResults(data.results || []);
+          setBatchPostProcessing(data.postProcessing || false);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleBatchImport = async () => {
+    if (!importPath.trim()) return;
+    setBatchImporting(true);
+    setBatchResults([]);
+    setBatchSummary(null);
+    setBatchCurrent(0);
+    setBatchTotal(0);
+    setBatchPostProcessing(false);
+
+    try {
+      const res = await fetch("/api/library/import/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: importPath.trim() }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setResult({ error: data.error || "Batch import failed" });
+        setBatchImporting(false);
+        return;
+      }
+
+      setBatchTotal(data.total || 0);
+      // Polling takes over from here
+    } catch (err) {
+      setResult({ error: String(err) });
+      setBatchImporting(false);
+    }
+  };
+
+  // Combine and clean output for display
+  const getDisplayOutput = () => {
+    if (!result || result.error) return null;
+    const parts: string[] = [];
+    if (result.output) parts.push(stripAnsi(result.output));
+    if (result.warnings) parts.push(stripAnsi(result.warnings));
+    return parts.filter(Boolean).join("\n").trim();
+  };
+
+  const displayOutput = result ? getDisplayOutput() : null;
+  const hasNewTracks = result?.scan && result.scan.scanned > 0;
+  const wasRetried = result?.retried;
+  const isRunning = importing || batchImporting;
+  const batchProgress = batchTotal > 0 ? Math.round((batchCurrent / batchTotal) * 100) : 0;
+
   return (
-    <Card>
-      <CardContent className="p-6 space-y-4">
-        <div>
-          <h3 className="text-lg font-semibold mb-1">Import Music</h3>
-          <p className="text-sm text-muted-foreground">
-            Import a folder into your library using Beets. Files will be auto-tagged and organized.
-          </p>
-        </div>
-        <div className="flex gap-3">
-          <Input
-            placeholder="/path/to/music/folder"
-            value={importPath}
-            onChange={(e) => setImportPath(e.target.value)}
-            className="flex-1"
-          />
-          <Button onClick={handleImport} disabled={importing || !importPath.trim()}>
-            {importing ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <FolderInput className="h-4 w-4 mr-2" />
-            )}
-            {importing ? "Importing..." : "Import"}
-          </Button>
-        </div>
-        {result && (
-          <Card className="bg-secondary/30">
-            <CardContent className="p-4 text-sm">
-              {result.error ? (
-                <p className="text-red-400">Error: {result.error}</p>
+    <div className="space-y-4">
+      {/* Single Folder Import */}
+      <Card>
+        <CardContent className="p-6 space-y-4">
+          <div>
+            <h3 className="text-lg font-semibold mb-1">Import Music</h3>
+            <p className="text-sm text-muted-foreground">
+              Import a folder into your library using Beets. Files will be auto-tagged and organized.
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <Input
+              placeholder="/path/to/music/folder"
+              value={importPath}
+              onChange={(e) => setImportPath(e.target.value)}
+              className="flex-1"
+            />
+            <Button onClick={handleImport} disabled={isRunning || !importPath.trim()}>
+              {importing ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
-                <div className="space-y-1">
-                  <p className="text-green-400">Import successful</p>
-                  {result.output && (
-                    <pre className="text-xs text-muted-foreground whitespace-pre-wrap max-h-48 overflow-y-auto">
-                      {result.output}
-                    </pre>
-                  )}
-                  {result.scan && (
-                    <p>
-                      Library re-scanned: {result.scan.scanned} files, {result.scan.added} added
-                    </p>
-                  )}
-                </div>
+                <FolderInput className="h-4 w-4 mr-2" />
               )}
-            </CardContent>
-          </Card>
-        )}
-      </CardContent>
-    </Card>
+              {importing ? "Importing..." : "Import"}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={handleBatchImport}
+              disabled={isRunning || !importPath.trim()}
+            >
+              {batchImporting ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <FolderUp className="h-4 w-4 mr-2" />
+              )}
+              {batchImporting ? "Batch..." : "Batch Import"}
+            </Button>
+          </div>
+
+          {/* Single import result */}
+          {result && !batchImporting && !batchSummary && (
+            <Card className="bg-secondary/30">
+              <CardContent className="p-4 text-sm space-y-3">
+                {result.error ? (
+                  <div>
+                    <p className="text-red-400 font-medium">Import failed</p>
+                    <pre className="text-xs text-red-300/70 whitespace-pre-wrap mt-1">
+                      {result.error}
+                      {result.details && `\n${result.details}`}
+                    </pre>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge variant={hasNewTracks ? "default" : "secondary"} className="text-xs">
+                        {hasNewTracks ? "Import complete" : "No new tracks imported"}
+                      </Badge>
+                      {wasRetried && (
+                        <Badge variant="outline" className="text-xs text-yellow-400 border-yellow-400/30">
+                          Auto-tag failed — imported with existing tags
+                        </Badge>
+                      )}
+                    </div>
+                    {result.scan && (
+                      <div className="flex gap-4 text-xs">
+                        <span>
+                          <span className="text-muted-foreground">Scanned:</span>{" "}
+                          <span className="font-medium">{result.scan.scanned}</span>
+                        </span>
+                        <span>
+                          <span className="text-muted-foreground">Added:</span>{" "}
+                          <span className="font-medium">{result.scan.added}</span>
+                        </span>
+                        {result.scan.errors > 0 && (
+                          <span>
+                            <span className="text-red-400">Errors:</span>{" "}
+                            <span className="font-medium text-red-400">{result.scan.errors}</span>
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {displayOutput && (
+                      <details className="group">
+                        <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+                          Show beet output
+                        </summary>
+                        <pre className="text-xs text-muted-foreground whitespace-pre-wrap max-h-64 overflow-y-auto mt-2 p-3 rounded bg-black/30 font-mono leading-relaxed">
+                          {displayOutput}
+                        </pre>
+                      </details>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Batch Import Progress */}
+      {(batchImporting || batchSummary) && (
+        <Card>
+          <CardContent className="p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold">Batch Import</h3>
+              {batchImporting && (
+                <Badge variant="outline" className="text-xs">
+                  {batchPostProcessing
+                    ? "Post-processing..."
+                    : `Importing ${batchCurrent}/${batchTotal} folders`}
+                </Badge>
+              )}
+              {batchSummary && !batchImporting && (
+                <Badge variant="default" className="text-xs">Complete</Badge>
+              )}
+            </div>
+
+            {/* Progress bar */}
+            {batchImporting && batchTotal > 0 && (
+              <div className="space-y-1">
+                <Progress value={batchProgress} className="h-2" />
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>{batchCurrentFolder}</span>
+                  <span>{batchProgress}%</span>
+                </div>
+              </div>
+            )}
+
+            {/* Folder results list */}
+            {batchResults.length > 0 && (
+              <div className="max-h-64 overflow-y-auto space-y-1">
+                {batchResults.map((r, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-2 py-1 text-sm"
+                  >
+                    {r.success ? (
+                      <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-red-500 shrink-0" />
+                    )}
+                    <span className={r.success ? "" : "text-muted-foreground"}>
+                      {r.folder}
+                    </span>
+                    {r.tracks && (
+                      <span className="text-xs text-muted-foreground">
+                        ({r.tracks} tracks)
+                      </span>
+                    )}
+                    {r.error && (
+                      <span className="text-xs text-red-400 truncate">
+                        — {r.error}
+                      </span>
+                    )}
+                  </div>
+                ))}
+                {/* Currently importing indicator */}
+                {batchImporting && !batchPostProcessing && batchCurrentFolder && (
+                  <div className="flex items-center gap-2 py-1 text-sm">
+                    <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+                    <span className="text-muted-foreground">{batchCurrentFolder}...</span>
+                  </div>
+                )}
+                {/* Remaining folders */}
+                {batchImporting && batchTotal > batchCurrent && (
+                  <div className="flex items-center gap-2 py-1 text-sm text-muted-foreground">
+                    <Circle className="h-4 w-4 shrink-0" />
+                    <span>Remaining: {batchTotal - batchCurrent} folders</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Summary */}
+            {batchSummary && (
+              <div className="flex gap-4 text-sm pt-2 border-t border-border">
+                <span>
+                  <span className="text-green-400 font-medium">{batchSummary.succeeded}</span>{" "}
+                  <span className="text-muted-foreground">succeeded</span>
+                </span>
+                {batchSummary.failed > 0 && (
+                  <span>
+                    <span className="text-red-400 font-medium">{batchSummary.failed}</span>{" "}
+                    <span className="text-muted-foreground">failed</span>
+                  </span>
+                )}
+                <span className="text-muted-foreground">
+                  {batchSummary.total} total
+                </span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }
 

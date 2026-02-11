@@ -1,8 +1,9 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { Sidebar } from "./Sidebar";
+import { SplashScreen } from "./SplashScreen";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 const PlayerBar = dynamic(
@@ -11,8 +12,22 @@ const PlayerBar = dynamic(
 );
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const [showSplash, setShowSplash] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && !sessionStorage.getItem("vynl-splash-shown")) {
+      setShowSplash(true);
+    }
+  }, []);
+
+  const handleSplashComplete = useCallback(() => {
+    sessionStorage.setItem("vynl-splash-shown", "1");
+    setShowSplash(false);
+  }, []);
+
   return (
     <TooltipProvider>
+      {showSplash && <SplashScreen onComplete={handleSplashComplete} />}
       <div className="h-screen flex flex-col overflow-hidden">
         <div className="flex flex-1 overflow-hidden">
           <Sidebar />

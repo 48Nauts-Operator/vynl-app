@@ -48,13 +48,13 @@ export async function status(speaker?: string): Promise<SonosStatus | null> {
     const data = JSON.parse(output);
     return {
       speaker: speaker || "default",
-      state: data.state || data.playback_state || data.transport_state || "unknown",
-      title: data.title || data.track,
-      artist: data.artist || data.creator,
-      album: data.album,
-      position: data.position || data.rel_time,
-      duration: data.duration || data.track_duration,
-      volume: data.volume !== undefined ? parseInt(data.volume) : undefined,
+      state: data.transport?.State || data.state || data.playback_state || data.transport_state || "unknown",
+      title: data.nowPlaying?.title || data.title || data.track,
+      artist: data.nowPlaying?.artist || data.artist || data.creator,
+      album: data.nowPlaying?.album || data.album,
+      position: data.position?.RelTime || data.rel_time,
+      duration: data.position?.TrackDuration || data.track_duration,
+      volume: data.volume !== undefined ? Number(data.volume) : undefined,
     };
   } catch {
     return null;
@@ -79,11 +79,22 @@ export async function openSpotify(
 }
 
 export async function play(speaker: string): Promise<void> {
-  await sonosExec(["play", "--name", speaker]);
+  try {
+    await sonosExec(["play", "--name", speaker]);
+  } catch (err) {
+    // UPnP 701 = transition not available (speaker still loading), safe to ignore
+    if (String(err).includes("701")) return;
+    throw err;
+  }
 }
 
 export async function pause(speaker: string): Promise<void> {
-  await sonosExec(["pause", "--name", speaker]);
+  try {
+    await sonosExec(["pause", "--name", speaker]);
+  } catch (err) {
+    if (String(err).includes("701")) return;
+    throw err;
+  }
 }
 
 export async function next(speaker: string): Promise<void> {

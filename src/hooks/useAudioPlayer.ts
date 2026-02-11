@@ -6,6 +6,8 @@ import { usePlayerStore } from "@/store/player";
 export function useAudioPlayer() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const historyRecorded = useRef(false);
+  const sonosPlayUriSent = useRef(false);
+  const trackChangedAt = useRef(0);
   const {
     currentTrack,
     isPlaying,
@@ -34,6 +36,8 @@ export function useAudioPlayer() {
     const audio = audioRef.current;
     if (!audio || !currentTrack) return;
 
+    trackChangedAt.current = Date.now();
+
     if (outputTarget === "browser" && currentTrack.filePath) {
       const audioUrl = `/api/audio${currentTrack.filePath}`;
       audio.src = audioUrl;
@@ -50,16 +54,22 @@ export function useAudioPlayer() {
       audio.load();
 
       // Send to Sonos via API
-      const tunifyHost = window.location.origin;
+      const vynlHost = process.env.NEXT_PUBLIC_VYNL_HOST || window.location.origin;
 
       if (currentTrack.filePath) {
+        // Encode path segments for Sonos (spaces/special chars must be percent-encoded)
+        const encodedPath = currentTrack.filePath
+          .split("/")
+          .map((seg) => encodeURIComponent(seg))
+          .join("/");
+        sonosPlayUriSent.current = true;
         fetch("/api/sonos/control", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             speaker: sonosSpeaker,
             action: "play-uri",
-            uri: `${tunifyHost}/api/audio${currentTrack.filePath}`,
+            uri: `${vynlHost}/api/audio${encodedPath}`,
           }),
         }).catch(console.error);
       } else if (currentTrack.sourceId && currentTrack.source === "spotify") {
@@ -97,6 +107,12 @@ export function useAudioPlayer() {
         audio.pause();
       }
     } else if (outputTarget === "sonos" && sonosSpeaker) {
+      // Skip if play-uri was just sent (it already starts playback)
+      if (sonosPlayUriSent.current && isPlaying) {
+        sonosPlayUriSent.current = false;
+        return;
+      }
+      sonosPlayUriSent.current = false;
       fetch("/api/sonos/control", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -107,6 +123,47 @@ export function useAudioPlayer() {
       }).catch(console.error);
     }
   }, [isPlaying, currentTrack, outputTarget, sonosSpeaker]);
+
+  // Poll Sonos status for playback position
+  useEffect(() => {
+    if (outputTarget !== "sonos" || !sonosSpeaker || !currentTrack) return;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/sonos/status?speaker=${encodeURIComponent(sonosSpeaker)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Parse time strings like "0:01:23" to seconds
+        const parseTime = (t: string | undefined): number => {
+          if (!t) return 0;
+          const parts = t.split(":").map(Number);
+          if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+          if (parts.length === 2) return parts[0] * 60 + parts[1];
+          return parts[0] || 0;
+        };
+
+        const position = parseTime(data.position);
+        const duration = parseTime(data.duration);
+
+        if (duration > 0) setDuration(duration);
+        setCurrentTime(position);
+
+        // Detect if Sonos stopped (track ended)
+        // Skip detection within 5s of a track change to avoid race with play-uri
+        const sinceTrackChange = Date.now() - trackChangedAt.current;
+        if (data.state === "STOPPED" && position === 0 && isPlaying && sinceTrackChange > 5000) {
+          playNext();
+        }
+      } catch {
+        // Polling error, ignore
+      }
+    };
+
+    poll();
+    const interval = setInterval(poll, 2000);
+    return () => clearInterval(interval);
+  }, [outputTarget, sonosSpeaker, currentTrack, isPlaying, setCurrentTime, setDuration, playNext]);
 
   // Handle volume
   useEffect(() => {

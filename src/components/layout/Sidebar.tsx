@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -14,13 +14,17 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  Music2,
   Disc3,
   Mic2,
+  Info,
+  Loader2,
+  FolderInput,
 } from "lucide-react";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Progress } from "@/components/ui/progress";
 
 const navItems = [
   { href: "/", label: "Home", icon: Home },
@@ -32,11 +36,55 @@ const navItems = [
   { href: "/profile", label: "Taste Profile", icon: User },
   { href: "/speakers", label: "Speakers", icon: Speaker },
   { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/about", label: "About", icon: Info },
 ];
+
+interface ImportJobStatus {
+  status: "idle" | "running" | "complete" | "error";
+  total?: number;
+  current?: number;
+  currentFolder?: string;
+  succeeded?: number;
+  failed?: number;
+  postProcessing?: boolean;
+}
+
+function useImportStatus() {
+  const [job, setJob] = useState<ImportJobStatus>({ status: "idle" });
+
+  useEffect(() => {
+    let active = true;
+
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/library/import/batch");
+        const data = await res.json();
+        if (active) setJob(data);
+      } catch {
+        // ignore
+      }
+    };
+
+    poll();
+    const interval = setInterval(poll, 3000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  return job;
+}
 
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const importJob = useImportStatus();
+  const isImporting = importJob.status === "running";
+  const importProgress =
+    isImporting && importJob.total
+      ? Math.round(((importJob.current || 0) / importJob.total) * 100)
+      : 0;
 
   return (
     <div
@@ -45,10 +93,18 @@ export function Sidebar() {
         collapsed ? "w-[72px]" : "w-[240px]"
       )}
     >
-      <div className="flex items-center gap-2 px-4 py-5">
-        <Music2 className="h-8 w-8 text-primary shrink-0" />
-        {!collapsed && (
-          <span className="text-xl font-bold tracking-tight">Tunify</span>
+      <div className="flex items-center justify-center px-2 py-5">
+        {collapsed ? (
+          <Disc3 className="h-8 w-8 text-primary shrink-0" />
+        ) : (
+          <Image
+            src="/logo-header.png"
+            alt="Vynl"
+            width={240}
+            height={56}
+            className="h-14 w-auto"
+            priority
+          />
         )}
       </div>
 
@@ -82,6 +138,35 @@ export function Sidebar() {
           })}
         </nav>
       </ScrollArea>
+
+      {/* Global import status indicator */}
+      {isImporting && (
+        <>
+          <Separator className="mx-2" />
+          <Link href="/library">
+            <div className="px-3 py-3 cursor-pointer hover:bg-secondary/30 transition-colors">
+              {collapsed ? (
+                <Loader2 className="h-5 w-5 text-primary animate-spin mx-auto" />
+              ) : (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <FolderInput className="h-3.5 w-3.5 text-primary shrink-0" />
+                    <span className="text-xs font-medium truncate">
+                      {importJob.postProcessing
+                        ? "Post-processing..."
+                        : `Importing ${importJob.current}/${importJob.total}`}
+                    </span>
+                  </div>
+                  <Progress value={importProgress} className="h-1.5" />
+                  <p className="text-[10px] text-muted-foreground truncate">
+                    {importJob.currentFolder}
+                  </p>
+                </div>
+              )}
+            </div>
+          </Link>
+        </>
+      )}
 
       <Separator className="mx-2" />
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { tracks } from "@/lib/db/schema";
+import { tracks, albumRules } from "@/lib/db/schema";
 import { FilesystemAdapter } from "@/lib/adapters/filesystem-adapter";
 import { BeetsAdapter } from "@/lib/adapters/beets-adapter";
 import { MusicSourceAdapter } from "@/lib/adapters/types";
@@ -34,6 +34,14 @@ export async function POST(request: NextRequest) {
       adapter = (await beetsAdapter.isAvailable()) ? beetsAdapter : fsAdapter;
     }
 
+    // Load album rules for pattern matching
+    const rules = db.select().from(albumRules).all();
+    const compiledRules = rules.map((r) => ({
+      regex: new RegExp(r.pattern, "i"),
+      targetAlbum: r.targetAlbum,
+      targetAlbumArtist: r.targetAlbumArtist,
+    }));
+
     let scanned = 0;
     let added = 0;
     let errors = 0;
@@ -47,6 +55,22 @@ export async function POST(request: NextRequest) {
       scanned++;
 
       try {
+        // Apply album rules (e.g., merge "ASOT 950" → "A State of Trance")
+        for (const rule of compiledRules) {
+          if (rule.regex.test(track.album)) {
+            track.album = rule.targetAlbum;
+            if (rule.targetAlbumArtist) {
+              // Always override albumArtist to normalize capitalization/spelling
+              track.albumArtist = rule.targetAlbumArtist;
+              // Also fix artist if it's missing/unknown
+              if (!track.artist || track.artist === "Unknown Artist") {
+                track.artist = rule.targetAlbumArtist;
+              }
+            }
+            break;
+          }
+        }
+
         // Save cover art if present
         let coverPath: string | undefined;
         if (track.coverData) {

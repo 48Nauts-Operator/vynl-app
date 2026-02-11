@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema";
 import path from "path";
 
-const DB_PATH = path.join(process.cwd(), "tunify.db");
+const DB_PATH = path.join(process.cwd(), "vynl.db");
 
 const sqlite = new Database(DB_PATH);
 sqlite.pragma("journal_mode = WAL");
@@ -96,6 +96,14 @@ sqlite.exec(`
     mood_preferences TEXT,
     generated_at TEXT DEFAULT (datetime('now')),
     feedback_count INTEGER DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS album_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern TEXT NOT NULL,
+    target_album TEXT NOT NULL,
+    target_album_artist TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
   );
 
   CREATE TABLE IF NOT EXISTS settings (

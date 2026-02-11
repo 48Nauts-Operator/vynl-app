@@ -12,10 +12,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { usePlayerStore } from "@/store/player";
-import { Disc3, Play, Loader2 } from "lucide-react";
+import { Disc3, Play, Loader2, ImageIcon, Pencil } from "lucide-react";
 import { motion } from "framer-motion";
-import { formatDuration } from "@/lib/utils";
+import { CoverSearchDialog } from "@/components/albums/CoverSearchDialog";
 
 interface Album {
   album: string;
@@ -34,6 +42,12 @@ export default function AlbumsPage() {
   const [sort, setSort] = useState("artist");
   const [genre, setGenre] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [coverSearch, setCoverSearch] = useState<{ album: string; artist: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; album: Album } | null>(null);
+  const [renaming, setRenaming] = useState<Album | null>(null);
+  const [renameAlbum, setRenameAlbum] = useState("");
+  const [renameArtist, setRenameArtist] = useState("");
+  const [renameLoading, setRenameLoading] = useState(false);
   const { setQueue } = usePlayerStore();
 
   useEffect(() => {
@@ -49,6 +63,14 @@ export default function AlbumsPage() {
     }
     load();
   }, [sort, genre]);
+
+  // Close context menu on click elsewhere
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [contextMenu]);
 
   const playAlbum = async (album: Album) => {
     const id = encodeURIComponent(`${album.album_artist}---${album.album}`);
@@ -67,6 +89,48 @@ export default function AlbumsPage() {
       }));
       setQueue(playerTracks, 0);
     }
+  };
+
+  const handleCoverUpdated = (coverPath: string) => {
+    setAlbums((prev) =>
+      prev.map((a) =>
+        a.album === coverSearch?.album && a.album_artist === coverSearch?.artist
+          ? { ...a, cover_path: coverPath }
+          : a
+      )
+    );
+    setCoverSearch(null);
+  };
+
+  const startRename = (album: Album) => {
+    setRenaming(album);
+    setRenameAlbum(album.album);
+    setRenameArtist(album.album_artist);
+  };
+
+  const handleRename = async () => {
+    if (!renaming || !renameAlbum.trim()) return;
+    setRenameLoading(true);
+    try {
+      await fetch("/api/albums/rename", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          oldAlbum: renaming.album,
+          oldAlbumArtist: renaming.album_artist,
+          newAlbum: renameAlbum.trim(),
+          newAlbumArtist: renameArtist.trim() || undefined,
+        }),
+      });
+      // Refresh the album list
+      const params = new URLSearchParams({ sort });
+      if (genre) params.set("genre", genre);
+      const res = await fetch(`/api/albums?${params}`);
+      const data = await res.json();
+      setAlbums(data.albums || []);
+    } catch {}
+    setRenameLoading(false);
+    setRenaming(null);
   };
 
   return (
@@ -116,6 +180,10 @@ export default function AlbumsPage() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: Math.min(i * 0.02, 0.5) }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setContextMenu({ x: e.clientX, y: e.clientY, album });
+              }}
             >
               <Link
                 href={`/albums/${encodeURIComponent(`${album.album_artist}---${album.album}`)}`}
@@ -163,6 +231,48 @@ export default function AlbumsPage() {
         </div>
       )}
 
+      {/* Custom context menu */}
+      {contextMenu && (
+        <div
+          className="fixed z-50 min-w-[160px] rounded-md border border-border bg-popover p-1 shadow-md animate-in fade-in-0 zoom-in-95"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+            onClick={() => {
+              playAlbum(contextMenu.album);
+              setContextMenu(null);
+            }}
+          >
+            <Play className="h-4 w-4" />
+            Play Album
+          </button>
+          <button
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+            onClick={() => {
+              setCoverSearch({
+                album: contextMenu.album.album,
+                artist: contextMenu.album.album_artist,
+              });
+              setContextMenu(null);
+            }}
+          >
+            <ImageIcon className="h-4 w-4" />
+            Find Cover Art
+          </button>
+          <button
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+            onClick={() => {
+              startRename(contextMenu.album);
+              setContextMenu(null);
+            }}
+          >
+            <Pencil className="h-4 w-4" />
+            Rename Album
+          </button>
+        </div>
+      )}
+
       {!loading && albums.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16">
           <Disc3 className="h-16 w-16 text-muted-foreground mb-4" />
@@ -172,6 +282,50 @@ export default function AlbumsPage() {
           </p>
         </div>
       )}
+
+      {/* Cover search dialog */}
+      {coverSearch && (
+        <CoverSearchDialog
+          open={!!coverSearch}
+          onOpenChange={(open) => !open && setCoverSearch(null)}
+          album={coverSearch.album}
+          albumArtist={coverSearch.artist}
+          onCoverUpdated={handleCoverUpdated}
+        />
+      )}
+
+      {/* Rename dialog */}
+      <Dialog open={!!renaming} onOpenChange={(open) => !open && setRenaming(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename Album</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Album Name</Label>
+              <Input
+                value={renameAlbum}
+                onChange={(e) => setRenameAlbum(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleRename()}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Album Artist</Label>
+              <Input
+                value={renameArtist}
+                onChange={(e) => setRenameArtist(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleRename()}
+              />
+            </div>
+            <Button
+              onClick={handleRename}
+              disabled={renameLoading || !renameAlbum.trim()}
+            >
+              {renameLoading ? "Renaming..." : "Rename"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

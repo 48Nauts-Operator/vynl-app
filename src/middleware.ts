@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 function isAuthenticated(request: NextRequest): boolean {
-  const apiKey = process.env.TUNIFY_API_KEY;
+  const apiKey = process.env.VYNL_API_KEY;
   if (!apiKey) return true; // No key configured = auth disabled
 
   // Localhost always passes

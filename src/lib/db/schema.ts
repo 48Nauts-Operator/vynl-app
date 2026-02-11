@@ -92,12 +92,22 @@ export const tasteProfile = sqliteTable("taste_profile", {
   feedbackCount: integer("feedback_count").default(0),
 });
 
+export const albumRules = sqliteTable("album_rules", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  pattern: text("pattern").notNull(),
+  targetAlbum: text("target_album").notNull(),
+  targetAlbumArtist: text("target_album_artist"),
+  createdAt: text("created_at").default(sql`(datetime('now'))`),
+});
+
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
   updatedAt: text("updated_at").default(sql`(datetime('now'))`),
 });
 
+export type AlbumRule = typeof albumRules.$inferSelect;
+export type NewAlbumRule = typeof albumRules.$inferInsert;
 export type Track = typeof tracks.$inferSelect;
 export type NewTrack = typeof tracks.$inferInsert;
 export type Playlist = typeof playlists.$inferSelect;
