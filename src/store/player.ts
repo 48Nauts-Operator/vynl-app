@@ -12,9 +12,10 @@ export interface Track {
   duration: number;
   filePath?: string;
   coverPath?: string;
-  source: "local" | "spotify" | "youtube" | "radio";
+  source: "local" | "spotify" | "youtube" | "radio" | "podcast";
   sourceId?: string;
   streamUrl?: string;
+  podcastEpisodeId?: number;
 }
 
 interface PlayerState {

@@ -19,6 +19,8 @@ import {
   Info,
   Loader2,
   FolderInput,
+  PartyPopper,
+  Podcast,
 } from "lucide-react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -33,6 +35,8 @@ const navItems = [
   { href: "/artists", label: "Artists", icon: Mic2 },
   { href: "/discover", label: "Discover", icon: Compass },
   { href: "/playlists", label: "Playlists", icon: ListMusic },
+  { href: "/podcasts", label: "Podcasts", icon: Podcast },
+  { href: "/party", label: "Party Mode", icon: PartyPopper },
   { href: "/profile", label: "Taste Profile", icon: User },
   { href: "/speakers", label: "Speakers", icon: Speaker },
   { href: "/settings", label: "Settings", icon: Settings },

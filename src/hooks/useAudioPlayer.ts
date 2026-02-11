@@ -38,8 +38,10 @@ export function useAudioPlayer() {
 
     trackChangedAt.current = Date.now();
 
-    if (outputTarget === "browser" && currentTrack.filePath) {
-      const audioUrl = `/api/audio${currentTrack.filePath}`;
+    if (outputTarget === "browser" && (currentTrack.filePath || currentTrack.streamUrl)) {
+      const audioUrl = currentTrack.filePath
+        ? `/api/audio${currentTrack.filePath}`
+        : currentTrack.streamUrl!;
       audio.src = audioUrl;
       audio.load();
       historyRecorded.current = false;
@@ -177,8 +179,25 @@ export function useAudioPlayer() {
     const audio = audioRef.current;
     if (!audio) return;
 
+    let lastPositionSave = 0;
+
     const onTimeUpdate = () => {
       setCurrentTime(audio.currentTime);
+
+      // Save podcast play position every 30 seconds
+      if (
+        currentTrack?.source === "podcast" &&
+        currentTrack.podcastEpisodeId &&
+        audio.currentTime > 0 &&
+        Math.floor(audio.currentTime) - lastPositionSave >= 30
+      ) {
+        lastPositionSave = Math.floor(audio.currentTime);
+        fetch(`/api/podcasts/0/episodes/${currentTrack.podcastEpisodeId}/position`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ position: audio.currentTime }),
+        }).catch(() => {});
+      }
 
       // Record to history after 30s of playback
       if (audio.currentTime > 30 && !historyRecorded.current && currentTrack) {

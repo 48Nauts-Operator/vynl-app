@@ -111,6 +111,54 @@ sqlite.exec(`
     value TEXT NOT NULL,
     updated_at TEXT DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS track_lyrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    track_id INTEGER NOT NULL UNIQUE REFERENCES tracks(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    format TEXT NOT NULL,
+    source TEXT NOT NULL,
+    fetched_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS podcasts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    author TEXT,
+    description TEXT,
+    feed_url TEXT NOT NULL UNIQUE,
+    cover_url TEXT,
+    cover_path TEXT,
+    last_fetched_at TEXT,
+    added_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS podcast_episodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    podcast_id INTEGER NOT NULL REFERENCES podcasts(id) ON DELETE CASCADE,
+    guid TEXT,
+    title TEXT NOT NULL,
+    description TEXT,
+    pub_date TEXT,
+    duration REAL,
+    audio_url TEXT NOT NULL,
+    local_path TEXT,
+    cover_url TEXT,
+    cover_path TEXT,
+    file_size INTEGER,
+    listened_at TEXT,
+    play_position REAL DEFAULT 0,
+    is_downloaded INTEGER DEFAULT 0,
+    added_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS episode_insights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id INTEGER NOT NULL REFERENCES podcast_episodes(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    content TEXT NOT NULL,
+    generated_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 export { schema };

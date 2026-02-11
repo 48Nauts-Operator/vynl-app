@@ -71,6 +71,18 @@ export default function AboutPage() {
             <Row label="Logo & Branding" value="Jarvis (Andre's AI)" />
             <Separator />
             <Row label="AI Assistant" value="Claude (Anthropic)" />
+            <Separator />
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Follow</span>
+              <a
+                href="https://x.com/andrewolke"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm font-medium text-primary hover:underline"
+              >
+                @andrewolke
+              </a>
+            </div>
           </CardContent>
         </Card>
       </motion.div>

@@ -106,6 +106,18 @@ export const settings = sqliteTable("settings", {
   updatedAt: text("updated_at").default(sql`(datetime('now'))`),
 });
 
+export const trackLyrics = sqliteTable("track_lyrics", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  trackId: integer("track_id")
+    .notNull()
+    .references(() => tracks.id, { onDelete: "cascade" })
+    .unique(),
+  content: text("content").notNull(),
+  format: text("format").notNull(), // "lrc" | "plain"
+  source: text("source").notNull(), // "embedded" | "lrclib" | "manual"
+  fetchedAt: text("fetched_at").default(sql`(datetime('now'))`),
+});
+
 export type AlbumRule = typeof albumRules.$inferSelect;
 export type NewAlbumRule = typeof albumRules.$inferInsert;
 export type Track = typeof tracks.$inferSelect;
@@ -116,3 +128,56 @@ export type ListeningHistoryEntry = typeof listeningHistory.$inferSelect;
 export type TasteFeedbackEntry = typeof tasteFeedback.$inferSelect;
 export type DiscoverySession = typeof discoverySessions.$inferSelect;
 export type TasteProfile = typeof tasteProfile.$inferSelect;
+export type TrackLyrics = typeof trackLyrics.$inferSelect;
+export type NewTrackLyrics = typeof trackLyrics.$inferInsert;
+
+// ---------- Podcast tables ----------
+
+export const podcasts = sqliteTable("podcasts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  title: text("title").notNull(),
+  author: text("author"),
+  description: text("description"),
+  feedUrl: text("feed_url").notNull().unique(),
+  coverUrl: text("cover_url"),
+  coverPath: text("cover_path"),
+  lastFetchedAt: text("last_fetched_at"),
+  addedAt: text("added_at").default(sql`(datetime('now'))`),
+});
+
+export const podcastEpisodes = sqliteTable("podcast_episodes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  podcastId: integer("podcast_id")
+    .notNull()
+    .references(() => podcasts.id, { onDelete: "cascade" }),
+  guid: text("guid"),
+  title: text("title").notNull(),
+  description: text("description"),
+  pubDate: text("pub_date"),
+  duration: real("duration"),
+  audioUrl: text("audio_url").notNull(),
+  localPath: text("local_path"),
+  coverUrl: text("cover_url"),
+  coverPath: text("cover_path"),
+  fileSize: integer("file_size"),
+  listenedAt: text("listened_at"),
+  playPosition: real("play_position").default(0),
+  isDownloaded: integer("is_downloaded", { mode: "boolean" }).default(false),
+  addedAt: text("added_at").default(sql`(datetime('now'))`),
+});
+
+export const episodeInsights = sqliteTable("episode_insights", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  episodeId: integer("episode_id")
+    .notNull()
+    .references(() => podcastEpisodes.id, { onDelete: "cascade" }),
+  type: text("type").notNull(), // "summary" | "wisdom" | "transcript"
+  content: text("content").notNull(),
+  generatedAt: text("generated_at").default(sql`(datetime('now'))`),
+});
+
+export type Podcast = typeof podcasts.$inferSelect;
+export type NewPodcast = typeof podcasts.$inferInsert;
+export type PodcastEpisode = typeof podcastEpisodes.$inferSelect;
+export type NewPodcastEpisode = typeof podcastEpisodes.$inferInsert;
+export type EpisodeInsight = typeof episodeInsights.$inferSelect;
