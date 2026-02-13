@@ -67,11 +67,33 @@ Vynl is a self-hosted music platform that combines library management, AI-powere
 - **Fabric AI Analysis** - Extract summaries, key insights, and actionable wisdom
 - **Insights Storage** - Searchable transcript and analysis per episode
 
+### Spotify Integration
+
+- **Library Extract** - Import all playlists, liked songs, and audio features from Spotify
+- **Smart Matching** - ISRC + fuzzy artist/title matching against your local library
+- **Playlist Mirroring** - Matched Spotify playlists automatically created as Vynl playlists
+- **Wishlist** - Unmatched tracks go to a wishlist with duplicate detection and playlist filters
+- **Audio Features** - BPM, energy, danceability, valence imported for every track
+
 ### Playlists
 
 - **Custom Playlists** - Create, edit, reorder, and manage playlists
 - **AI Generation** - Generate playlists by mood with auto-generated cover art and names
 - **Heavy Rotation** - Auto-updating playlist from tracks with 3+ plays in last 4 weeks
+- **Grid & List Views** - Toggle between card grid and sortable table for playlists and tracks
+
+### Karaoke Mode
+
+- **Split-Screen Layout** - Track queue on the left, time-synced lyrics on the right
+- **Synchronized Lyrics** - Line-by-line scrolling synced to playback via LRCLIB
+- **Queue Management** - Build and manage your karaoke session queue
+
+### Ratings & Stats
+
+- **Track Ratings** - Rate tracks 1-5 with golden vinyl icons
+- **Album Ratings** - Computed as average of track ratings
+- **Listening Stats** - Best albums, most played tracks, listening hours
+- **Worst Tracks** - Find and archive your least favorite tracks
 
 ### Library Management
 
@@ -92,7 +114,7 @@ Vynl is a self-hosted music platform that combines library management, AI-powere
 
 ```bash
 # Clone
-git clone git@github.com:48Nauts-Operator/vynl-app.git
+git clone https://github.com/48Nauts-Operator/vynl-app.git
 cd vynl-app
 
 # Install
@@ -121,6 +143,7 @@ Open [http://localhost:3101](http://localhost:3101)
 | `ANTHROPIC_API_KEY` | For AI discovery & recommendations | `sk-ant-...` |
 | `SPOTIFY_CLIENT_ID` | Spotify integration | |
 | `SPOTIFY_CLIENT_SECRET` | Spotify integration | |
+| `SPOTIFY_REDIRECT_URI` | Spotify OAuth callback | `http://127.0.0.1:3101/api/spotify/callback` |
 
 ### Prerequisites
 
@@ -132,25 +155,66 @@ Open [http://localhost:3101](http://localhost:3101)
 
 ### Docker
 
-Run Vynl in a container with your music library mounted:
+Pre-built images are available on GitHub Container Registry for **amd64** and **arm64**:
 
 ```bash
-# Copy and edit the env file
-cp .env.example .env
+docker pull ghcr.io/48nauts-operator/vynl-app:latest
+```
 
-# Build and start
+#### Quick Start with Docker Compose
+
+```bash
+# Clone the repo (for docker-compose.yml and .env.example)
+git clone https://github.com/48Nauts-Operator/vynl-app.git
+cd vynl-app
+
+# Configure
+cp .env.example .env
+# Edit .env with your LAN IP and music path
+
+# Start (pulls the pre-built image)
 docker compose up -d
 ```
 
-Configure your `.env` with your LAN IP and music path:
+#### Portainer / Stack Deployment
 
-```env
-HOST_IP=192.168.1.100
-MUSIC_LIBRARY_PATH=/mnt/nas/music
-ANTHROPIC_API_KEY=sk-ant-...
+Use the image `ghcr.io/48nauts-operator/vynl-app:latest` and configure these environment variables:
+
+| Variable | Required | Example |
+|---|---|---|
+| `HOST_IP` | Yes | `192.168.1.100` |
+| `MUSIC_LIBRARY_PATH` | Yes | `/mnt/nas/music` |
+| `ANTHROPIC_API_KEY` | Optional | `sk-ant-...` |
+| `SPOTIFY_CLIENT_ID` | Optional | |
+| `SPOTIFY_CLIENT_SECRET` | Optional | |
+
+Mount these volumes:
+
+| Container Path | Purpose |
+|---|---|
+| `/music/library` | Music library directory |
+| `/music/library.db` | Beets SQLite database |
+| `/music/podcasts` | Podcast episode storage |
+| `/app/data` | Persistent app data (named volume) |
+| `/app/public/covers` | Cover art cache (named volume) |
+
+#### Build Locally
+
+To build the image yourself instead of pulling:
+
+```bash
+cp .env.example .env
+# Edit .env, then:
+docker compose up -d --build
 ```
 
-The Docker image (~200MB) includes Beets and FFmpeg. For Sonos on the same network, you may need host networking — uncomment `network_mode: host` in `docker-compose.yml`.
+> In `docker-compose.yml`, comment out `image:` and uncomment `build: .` to use local builds.
+
+#### Notes
+
+- The Docker image (~200MB) includes Beets and FFmpeg
+- For Sonos on the same network, you may need host networking — uncomment `network_mode: host` in `docker-compose.yml`
+- Images are automatically rebuilt and published on every push to `main`
 
 > **Note:** Whisper and Fabric AI for podcast transcription/analysis are not yet available in Docker. These features require a native install for now and are planned for a future Docker release.
 
@@ -223,8 +287,18 @@ See [docs/features/](docs/features/) for detailed specs.
 
 | Feature | Status | Description |
 |---|---|---|
+| [Spotify Library Extract](docs/features/012-spotify-library-extract.md) | Done | OAuth, extraction, matching, wishlist |
+| [Party Mode](docs/features/003-party-mode.md) | Done | Visualizer, lyrics, fullscreen |
+| [Library Health](docs/features/004-library-health.md) | Done | Duplicates, housekeeping, album rules |
+| [Album Browsing](docs/features/005-album-browsing.md) | Done | Grid/list views, ratings, cover art |
+| [Wish List](docs/features/006-wish-list.md) | Done | Spotify missing tracks, dedup, filters |
+| [AI DJ Party Mode](docs/features/007-ai-dj-party-mode.md) | In Progress | AI-powered DJ with crossfading |
 | [LLM Import Diagnostics](docs/features/001-llm-import-diagnostics.md) | Planned | AI-powered error investigation for failed imports |
 | [YouTube Integration](docs/features/002-youtube-integration.md) | Planned | Download, transcribe, and analyze YouTube content |
+| [AI Music Generation](docs/features/008-ai-music-generation.md) | Planned | Generate original music with AI |
+| [Usenet Integration](docs/features/009-usenet-integration.md) | Planned | NZB download automation |
+| [Song Recognition](docs/features/010-song-recognition.md) | Planned | Shazam-like audio fingerprinting |
+| [Song Stories](docs/features/011-song-stories.md) | Planned | AI-generated backstories for tracks |
 
 ## Contributing
 
