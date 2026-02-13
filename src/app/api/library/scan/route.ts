@@ -103,6 +103,7 @@ export async function POST(request: NextRequest) {
             format: track.format,
             bitrate: track.bitrate,
             sampleRate: track.sampleRate,
+            isrc: track.isrc,
             coverPath,
             source: "local",
           })
@@ -122,6 +123,7 @@ export async function POST(request: NextRequest) {
               format: track.format,
               bitrate: track.bitrate,
               sampleRate: track.sampleRate,
+              isrc: track.isrc,
               coverPath,
             },
           })
@@ -134,7 +136,36 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ adapter: adapter.name, scanned, added, errors });
+    // Post-scan: detect compilations
+    // An album is a compilation if it has 4+ distinct album_artists (or track artists)
+    // and album_artist isn't already "Various Artists"
+    let compilationsFixed = 0;
+    try {
+      const sqlite = (db as any).session?.client || (db as any).$client;
+      const compAlbums = sqlite.prepare(`
+        SELECT album,
+               COUNT(DISTINCT COALESCE(album_artist, artist)) as aa_count,
+               COUNT(DISTINCT artist) as artist_count
+        FROM tracks
+        WHERE source = 'local'
+          AND album != 'Unknown Album' AND album != ''
+          AND COALESCE(album_artist, '') != 'Various Artists'
+        GROUP BY album
+        HAVING COUNT(DISTINCT COALESCE(album_artist, artist)) >= 4
+            OR COUNT(DISTINCT artist) >= 4
+      `).all() as { album: string; aa_count: number; artist_count: number }[];
+
+      for (const ca of compAlbums) {
+        sqlite.prepare(
+          `UPDATE tracks SET album_artist = 'Various Artists' WHERE album = ? AND source = 'local'`
+        ).run(ca.album);
+        compilationsFixed++;
+      }
+    } catch (err) {
+      console.error("Compilation detection error:", err);
+    }
+
+    return NextResponse.json({ adapter: adapter.name, scanned, added, errors, compilationsFixed });
   } catch (err) {
     console.error("Scan error:", err);
     return NextResponse.json(

@@ -15,10 +15,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { usePlayerStore, Track as PlayerTrack } from "@/store/player";
-import { Play, Shuffle, Disc3, Loader2, Clock, ImageIcon, Pencil } from "lucide-react";
+import { Play, Pause, Shuffle, Disc3, Loader2, Clock, ImageIcon, Pencil, Archive, ListPlus, Star } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatDuration } from "@/lib/utils";
 import { CoverSearchDialog } from "@/components/albums/CoverSearchDialog";
+import { AddToPlaylistDialog } from "@/components/playlists/AddToPlaylistDialog";
+import { VinylRating } from "@/components/ui/VinylRating";
 
 interface AlbumTrack {
   id: number;
@@ -58,6 +60,7 @@ function toPlayerTrack(t: AlbumTrack): PlayerTrack {
     title: t.title,
     artist: t.artist,
     album: t.album,
+    albumArtist: t.albumArtist,
     duration: t.duration,
     filePath: t.filePath,
     coverPath: t.coverPath || undefined,
@@ -65,12 +68,39 @@ function toPlayerTrack(t: AlbumTrack): PlayerTrack {
   };
 }
 
+function EqualizerBars({ paused }: { paused: boolean }) {
+  return (
+    <>
+      <style>{`
+        @keyframes vynl-eq-bar {
+          0%, 100% { height: 15%; }
+          50% { height: 90%; }
+        }
+      `}</style>
+      <div className="flex items-end justify-center gap-[2px] h-4 w-4">
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            className="w-[3px] rounded-sm bg-primary"
+            style={{
+              height: paused ? '40%' : undefined,
+              animation: paused
+                ? 'none'
+                : `vynl-eq-bar ${0.3 + i * 0.15}s ease-in-out ${i * 0.1}s infinite`,
+            }}
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
 export default function AlbumDetailPage() {
   const params = useParams();
   const [album, setAlbum] = useState<AlbumDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCoverSearch, setShowCoverSearch] = useState(false);
-  const { setQueue } = usePlayerStore();
+  const { setQueue, currentTrack, isPlaying } = usePlayerStore();
 
   // Track context menu
   const [trackMenu, setTrackMenu] = useState<{ x: number; y: number; track: AlbumTrack; index: number } | null>(null);
@@ -81,11 +111,32 @@ export default function AlbumDetailPage() {
   const [renameArtist, setRenameArtist] = useState("");
   const [renameLoading, setRenameLoading] = useState(false);
 
+  // Archive
+  const [archiving, setArchiving] = useState<AlbumTrack | null>(null);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+
+  // Add to playlist
+  const [playlistTrackIds, setPlaylistTrackIds] = useState<number[]>([]);
+  const [showPlaylistDialog, setShowPlaylistDialog] = useState(false);
+
+  // Ratings
+  const [ratingsMap, setRatingsMap] = useState<Record<number, number>>({});
+
   useEffect(() => {
     async function load() {
       const res = await fetch(`/api/albums/${params.id}`);
       if (res.ok) {
-        setAlbum(await res.json());
+        const data = await res.json();
+        setAlbum(data);
+        // Fetch ratings for all tracks in this album
+        const ids = data.tracks.map((t: AlbumTrack) => t.id).join(",");
+        if (ids) {
+          const rRes = await fetch(`/api/ratings?trackIds=${ids}`);
+          if (rRes.ok) {
+            const rData = await rRes.json();
+            setRatingsMap(rData.ratings || {});
+          }
+        }
       }
       setLoading(false);
     }
@@ -166,6 +217,43 @@ export default function AlbumDetailPage() {
     setRenaming(null);
   };
 
+  const handleArchiveTrack = async () => {
+    if (!archiving) return;
+    setArchiveLoading(true);
+    try {
+      await fetch("/api/library/archive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trackIds: [archiving.id] }),
+      });
+      // Remove track from local state
+      setAlbum((prev) => {
+        if (!prev) return prev;
+        const updated = prev.tracks.filter((t) => t.id !== archiving.id);
+        return { ...prev, tracks: updated, trackCount: updated.length };
+      });
+    } catch {}
+    setArchiveLoading(false);
+    setArchiving(null);
+  };
+
+  const handleRateTrack = async (trackId: number, rating: number) => {
+    setRatingsMap((prev) => ({ ...prev, [trackId]: rating }));
+    await fetch(`/api/tracks/${trackId}/rating`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rating }),
+    });
+  };
+
+  // Compute album average rating
+  const ratedValues = album.tracks
+    .map((t) => ratingsMap[t.id])
+    .filter((v): v is number => v != null);
+  const albumAvgRating = ratedValues.length > 0
+    ? Math.round((ratedValues.reduce((a, b) => a + b, 0) / ratedValues.length) * 10) / 10
+    : null;
+
   // Group by disc if multiple discs
   const hasMultipleDiscs = new Set(album.tracks.map((t) => t.discNumber)).size > 1;
 
@@ -219,6 +307,14 @@ export default function AlbumDetailPage() {
               </>
             )}
           </div>
+          {albumAvgRating !== null && (
+            <div className="flex items-center gap-2">
+              <VinylRating rating={Math.round(albumAvgRating)} readOnly size="sm" />
+              <span className="text-sm text-muted-foreground">
+                Avg {albumAvgRating.toFixed(1)} ({ratedValues.length} rated)
+              </span>
+            </div>
+          )}
           <div className="flex gap-3 pt-2">
             <Button onClick={playAll}>
               <Play className="h-4 w-4 mr-2" /> Play All
@@ -233,9 +329,10 @@ export default function AlbumDetailPage() {
       {/* Tracklist */}
       <Card>
         <CardContent className="p-0">
-          <div className="grid grid-cols-[40px_1fr_80px] gap-4 px-4 py-2 text-xs text-muted-foreground uppercase tracking-wider border-b border-border">
+          <div className="grid grid-cols-[40px_1fr_120px_80px] gap-4 px-4 py-2 text-xs text-muted-foreground uppercase tracking-wider border-b border-border">
             <span>#</span>
             <span>Title</span>
+            <span>Rating</span>
             <span className="text-right">
               <Clock className="h-3 w-3 inline" />
             </span>
@@ -245,6 +342,7 @@ export default function AlbumDetailPage() {
             const showDiscHeader =
               hasMultipleDiscs &&
               (!prevTrack || prevTrack.discNumber !== track.discNumber);
+            const isActive = currentTrack?.id === track.id;
 
             return (
               <React.Fragment key={track.id}>
@@ -257,26 +355,45 @@ export default function AlbumDetailPage() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: i * 0.02 }}
-                  className="grid grid-cols-[40px_1fr_80px] gap-4 px-4 py-2 hover:bg-secondary/30 transition-colors cursor-pointer group items-center"
+                  className={`grid grid-cols-[40px_1fr_120px_80px] gap-4 px-4 py-2 hover:bg-secondary/30 transition-colors cursor-pointer group items-center ${isActive ? "bg-primary/10" : ""}`}
                   onClick={() => playTrack(i)}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     setTrackMenu({ x: e.clientX, y: e.clientY, track, index: i });
                   }}
                 >
-                  <span className="text-sm text-muted-foreground group-hover:hidden">
-                    {track.trackNumber || i + 1}
-                  </span>
-                  <Play className="h-4 w-4 hidden group-hover:block text-primary" />
+                  {isActive ? (
+                    <div className="flex items-center justify-center">
+                      {isPlaying ? (
+                        <EqualizerBars paused={false} />
+                      ) : (
+                        <Pause className="h-4 w-4 text-primary" />
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <span className="text-sm text-muted-foreground group-hover:hidden">
+                        {track.trackNumber || i + 1}
+                      </span>
+                      <Play className="h-4 w-4 hidden group-hover:block text-primary" />
+                    </>
+                  )}
                   <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{track.title}</p>
+                    <p className={`text-sm font-medium truncate ${isActive ? "text-primary" : ""}`}>{track.title}</p>
                     {track.artist !== album.albumArtist && (
-                      <p className="text-xs text-muted-foreground truncate">
+                      <p className={`text-xs truncate ${isActive ? "text-primary/70" : "text-muted-foreground"}`}>
                         {track.artist}
                       </p>
                     )}
                   </div>
-                  <span className="text-sm text-muted-foreground text-right">
+                  <div onClick={(e) => e.stopPropagation()}>
+                    <VinylRating
+                      rating={ratingsMap[track.id] ?? null}
+                      onChange={(r) => handleRateTrack(track.id, r)}
+                      size="sm"
+                    />
+                  </div>
+                  <span className={`text-sm text-right ${isActive ? "text-primary/70" : "text-muted-foreground"}`}>
                     {formatDuration(track.duration)}
                   </span>
                 </motion.div>
@@ -302,6 +419,17 @@ export default function AlbumDetailPage() {
             <Play className="h-4 w-4" />
             Play
           </button>
+          <div className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm">
+            <Star className="h-4 w-4" />
+            <VinylRating
+              rating={ratingsMap[trackMenu.track.id] ?? null}
+              onChange={(r) => {
+                handleRateTrack(trackMenu.track.id, r);
+                setTrackMenu(null);
+              }}
+              size="sm"
+            />
+          </div>
           <button
             className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
             onClick={() => {
@@ -311,6 +439,28 @@ export default function AlbumDetailPage() {
           >
             <Pencil className="h-4 w-4" />
             Rename Track
+          </button>
+          <button
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+            onClick={() => {
+              setPlaylistTrackIds([trackMenu.track.id]);
+              setShowPlaylistDialog(true);
+              setTrackMenu(null);
+            }}
+          >
+            <ListPlus className="h-4 w-4" />
+            Add to Playlist
+          </button>
+          <div className="my-1 border-t border-border" />
+          <button
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-destructive/10 text-destructive hover:text-destructive"
+            onClick={() => {
+              setArchiving(trackMenu.track);
+              setTrackMenu(null);
+            }}
+          >
+            <Archive className="h-4 w-4" />
+            Archive Track
           </button>
         </div>
       )}
@@ -358,6 +508,39 @@ export default function AlbumDetailPage() {
           setAlbum((prev) => prev ? { ...prev, coverPath } : prev);
           setShowCoverSearch(false);
         }}
+      />
+
+      {/* Archive track confirmation */}
+      <Dialog open={!!archiving} onOpenChange={(open) => !open && setArchiving(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Archive Track</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Archive <strong>{archiving?.title}</strong> by{" "}
+            <strong>{archiving?.artist}</strong>? The file will be moved to
+            the archive folder.
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setArchiving(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleArchiveTrack}
+              disabled={archiveLoading}
+            >
+              {archiveLoading ? "Archiving..." : "Archive"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add to playlist dialog */}
+      <AddToPlaylistDialog
+        open={showPlaylistDialog}
+        onOpenChange={setShowPlaylistDialog}
+        trackIds={playlistTrackIds}
       />
     </div>
   );

@@ -112,6 +112,13 @@ sqlite.exec(`
     updated_at TEXT DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS track_ratings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    track_id INTEGER NOT NULL UNIQUE REFERENCES tracks(id) ON DELETE CASCADE,
+    rating INTEGER NOT NULL CHECK(rating >= 1 AND rating <= 5),
+    rated_at TEXT DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS track_lyrics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     track_id INTEGER NOT NULL UNIQUE REFERENCES tracks(id) ON DELETE CASCADE,
@@ -159,6 +166,139 @@ sqlite.exec(`
     content TEXT NOT NULL,
     generated_at TEXT DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS dj_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    audience TEXT,
+    vibe TEXT NOT NULL,
+    duration_minutes INTEGER,
+    occasion TEXT,
+    special_requests TEXT,
+    dj_notes TEXT,
+    track_count INTEGER DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'generating',
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS dj_session_tracks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES dj_sessions(id) ON DELETE CASCADE,
+    track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    dj_note TEXT,
+    played INTEGER DEFAULT 0,
+    skipped INTEGER DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS track_audio_features (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    track_id INTEGER NOT NULL UNIQUE REFERENCES tracks(id) ON DELETE CASCADE,
+    bpm REAL,
+    energy REAL,
+    danceability REAL,
+    key TEXT,
+    camelot TEXT,
+    genre_refined TEXT,
+    style_tags TEXT,
+    analysis_method TEXT NOT NULL DEFAULT 'llm',
+    confidence REAL DEFAULT 0.5,
+    analyzed_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS spotify_auth (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    spotify_user_id TEXT NOT NULL,
+    spotify_display_name TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS spotify_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    status TEXT NOT NULL DEFAULT 'running',
+    total_playlists INTEGER DEFAULT 0,
+    total_tracks INTEGER DEFAULT 0,
+    total_liked_songs INTEGER DEFAULT 0,
+    matched_tracks INTEGER DEFAULT 0,
+    unmatched_tracks INTEGER DEFAULT 0,
+    started_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS spotify_playlists (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER NOT NULL REFERENCES spotify_snapshots(id) ON DELETE CASCADE,
+    spotify_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    image_url TEXT,
+    track_count INTEGER DEFAULT 0,
+    vynl_playlist_id INTEGER REFERENCES playlists(id) ON DELETE SET NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS spotify_tracks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER NOT NULL REFERENCES spotify_snapshots(id) ON DELETE CASCADE,
+    spotify_id TEXT NOT NULL,
+    spotify_uri TEXT,
+    title TEXT NOT NULL,
+    artist TEXT NOT NULL,
+    album TEXT,
+    isrc TEXT,
+    duration_ms INTEGER,
+    cover_url TEXT,
+    preview_url TEXT,
+    is_liked_song INTEGER DEFAULT 0,
+    bpm REAL,
+    energy REAL,
+    danceability REAL,
+    valence REAL,
+    audio_key INTEGER,
+    audio_mode INTEGER,
+    local_track_id INTEGER REFERENCES tracks(id) ON DELETE SET NULL,
+    match_method TEXT,
+    match_confidence REAL
+  );
+
+  CREATE TABLE IF NOT EXISTS spotify_playlist_tracks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    spotify_playlist_id INTEGER NOT NULL REFERENCES spotify_playlists(id) ON DELETE CASCADE,
+    spotify_track_id INTEGER NOT NULL REFERENCES spotify_tracks(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS wish_list (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL DEFAULT 'spotify_missing',
+    seed_title TEXT,
+    seed_artist TEXT,
+    seed_album TEXT,
+    spotify_track_id INTEGER REFERENCES spotify_tracks(id) ON DELETE SET NULL,
+    spotify_uri TEXT,
+    isrc TEXT,
+    cover_url TEXT,
+    spotify_playlist_names TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT DEFAULT (datetime('now'))
+  );
 `);
+
+// Migrations — add columns that may not exist in older databases
+try {
+  sqlite.pragma(`table_info(tracks)`);
+  const cols = sqlite.pragma(`table_info(tracks)`) as { name: string }[];
+  if (!cols.some((c: { name: string }) => c.name === "isrc")) {
+    sqlite.prepare(`ALTER TABLE tracks ADD COLUMN isrc TEXT`).run();
+  }
+} catch {
+  // Column check failed, try adding anyway
+  try { sqlite.prepare(`ALTER TABLE tracks ADD COLUMN isrc TEXT`).run(); } catch { /* already exists */ }
+}
+try {
+  sqlite.prepare(`CREATE INDEX IF NOT EXISTS idx_tracks_isrc ON tracks(isrc)`).run();
+} catch {
+  // Index already exists
+}
 
 export { schema };

@@ -18,6 +18,7 @@ export const tracks = sqliteTable("tracks", {
   bitrate: integer("bitrate"),
   sampleRate: integer("sample_rate"),
   coverPath: text("cover_path"),
+  isrc: text("isrc"),
   source: text("source").notNull().default("local"),
   sourceId: text("source_id"),
   addedAt: text("added_at").default(sql`(datetime('now'))`),
@@ -106,6 +107,16 @@ export const settings = sqliteTable("settings", {
   updatedAt: text("updated_at").default(sql`(datetime('now'))`),
 });
 
+export const trackRatings = sqliteTable("track_ratings", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  trackId: integer("track_id")
+    .notNull()
+    .references(() => tracks.id, { onDelete: "cascade" })
+    .unique(),
+  rating: integer("rating").notNull(),
+  ratedAt: text("rated_at").default(sql`(datetime('now'))`),
+});
+
 export const trackLyrics = sqliteTable("track_lyrics", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   trackId: integer("track_id")
@@ -128,6 +139,8 @@ export type ListeningHistoryEntry = typeof listeningHistory.$inferSelect;
 export type TasteFeedbackEntry = typeof tasteFeedback.$inferSelect;
 export type DiscoverySession = typeof discoverySessions.$inferSelect;
 export type TasteProfile = typeof tasteProfile.$inferSelect;
+export type TrackRating = typeof trackRatings.$inferSelect;
+export type NewTrackRating = typeof trackRatings.$inferInsert;
 export type TrackLyrics = typeof trackLyrics.$inferSelect;
 export type NewTrackLyrics = typeof trackLyrics.$inferInsert;
 
@@ -181,3 +194,156 @@ export type NewPodcast = typeof podcasts.$inferInsert;
 export type PodcastEpisode = typeof podcastEpisodes.$inferSelect;
 export type NewPodcastEpisode = typeof podcastEpisodes.$inferInsert;
 export type EpisodeInsight = typeof episodeInsights.$inferSelect;
+
+// ---------- DJ Session tables ----------
+// [VynlDJ] — extractable: DJ session persistence
+
+export const djSessions = sqliteTable("dj_sessions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  audience: text("audience"), // JSON array of age groups
+  vibe: text("vibe").notNull(), // "chill" | "mixed" | "dance" | "high_energy"
+  durationMinutes: integer("duration_minutes"),
+  occasion: text("occasion"),
+  specialRequests: text("special_requests"),
+  djNotes: text("dj_notes"),
+  trackCount: integer("track_count").default(0),
+  status: text("status").notNull().default("generating"), // "generating" | "ready" | "playing" | "completed"
+  createdAt: text("created_at").default(sql`(datetime('now'))`),
+});
+
+export const djSessionTracks = sqliteTable("dj_session_tracks", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  sessionId: integer("session_id")
+    .notNull()
+    .references(() => djSessions.id, { onDelete: "cascade" }),
+  trackId: integer("track_id")
+    .notNull()
+    .references(() => tracks.id, { onDelete: "cascade" }),
+  position: integer("position").notNull(),
+  djNote: text("dj_note"),
+  played: integer("played").default(0),
+  skipped: integer("skipped").default(0),
+});
+
+export type DjSession = typeof djSessions.$inferSelect;
+export type NewDjSession = typeof djSessions.$inferInsert;
+export type DjSessionTrack = typeof djSessionTracks.$inferSelect;
+export type NewDjSessionTrack = typeof djSessionTracks.$inferInsert;
+
+// ---------- Track Audio Features ----------
+// [VynlDJ] — extractable: LLM/audio-analyzed track features for DJ mixing
+
+export const trackAudioFeatures = sqliteTable("track_audio_features", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  trackId: integer("track_id")
+    .notNull()
+    .references(() => tracks.id, { onDelete: "cascade" })
+    .unique(),
+  bpm: real("bpm"),
+  energy: real("energy"),                // 0.0-1.0 (calm → intense)
+  danceability: real("danceability"),    // 0.0-1.0
+  key: text("key"),                      // "C major", "A minor"
+  camelot: text("camelot"),              // "8B", "5A" for harmonic mixing
+  genreRefined: text("genre_refined"),   // LLM-refined genre
+  styleTags: text("style_tags"),         // JSON array: ["groovy","upbeat"]
+  analysisMethod: text("analysis_method").notNull().default("llm"), // "llm" | "audio" | "manual"
+  confidence: real("confidence").default(0.5),
+  analyzedAt: text("analyzed_at").default(sql`(datetime('now'))`),
+});
+
+export type TrackAudioFeatures = typeof trackAudioFeatures.$inferSelect;
+export type NewTrackAudioFeatures = typeof trackAudioFeatures.$inferInsert;
+
+// ---------- Spotify Integration tables ----------
+
+export const spotifyAuth = sqliteTable("spotify_auth", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  spotifyUserId: text("spotify_user_id").notNull(),
+  spotifyDisplayName: text("spotify_display_name"),
+});
+
+export const spotifySnapshots = sqliteTable("spotify_snapshots", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  status: text("status").notNull().default("running"), // "running" | "complete" | "error" | "cancelled"
+  totalPlaylists: integer("total_playlists").default(0),
+  totalTracks: integer("total_tracks").default(0),
+  totalLikedSongs: integer("total_liked_songs").default(0),
+  matchedTracks: integer("matched_tracks").default(0),
+  unmatchedTracks: integer("unmatched_tracks").default(0),
+  startedAt: text("started_at").default(sql`(datetime('now'))`),
+  completedAt: text("completed_at"),
+});
+
+export const spotifyPlaylists = sqliteTable("spotify_playlists", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  snapshotId: integer("snapshot_id")
+    .notNull()
+    .references(() => spotifySnapshots.id, { onDelete: "cascade" }),
+  spotifyId: text("spotify_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  imageUrl: text("image_url"),
+  trackCount: integer("track_count").default(0),
+  vynlPlaylistId: integer("vynl_playlist_id").references(() => playlists.id, { onDelete: "set null" }),
+});
+
+export const spotifyTracks = sqliteTable("spotify_tracks", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  snapshotId: integer("snapshot_id")
+    .notNull()
+    .references(() => spotifySnapshots.id, { onDelete: "cascade" }),
+  spotifyId: text("spotify_id").notNull(),
+  spotifyUri: text("spotify_uri"),
+  title: text("title").notNull(),
+  artist: text("artist").notNull(),
+  album: text("album"),
+  isrc: text("isrc"),
+  durationMs: integer("duration_ms"),
+  coverUrl: text("cover_url"),
+  previewUrl: text("preview_url"),
+  isLikedSong: integer("is_liked_song", { mode: "boolean" }).default(false),
+  bpm: real("bpm"),
+  energy: real("energy"),
+  danceability: real("danceability"),
+  valence: real("valence"),
+  audioKey: integer("audio_key"),
+  audioMode: integer("audio_mode"),
+  localTrackId: integer("local_track_id").references(() => tracks.id, { onDelete: "set null" }),
+  matchMethod: text("match_method"), // "isrc" | "fuzzy" | null
+  matchConfidence: real("match_confidence"),
+});
+
+export const spotifyPlaylistTracks = sqliteTable("spotify_playlist_tracks", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  spotifyPlaylistId: integer("spotify_playlist_id")
+    .notNull()
+    .references(() => spotifyPlaylists.id, { onDelete: "cascade" }),
+  spotifyTrackId: integer("spotify_track_id")
+    .notNull()
+    .references(() => spotifyTracks.id, { onDelete: "cascade" }),
+  position: integer("position").notNull(),
+});
+
+export const wishList = sqliteTable("wish_list", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  type: text("type").notNull().default("spotify_missing"), // "spotify_missing" | "similar_music" | "artist_discovery"
+  seedTitle: text("seed_title"),
+  seedArtist: text("seed_artist"),
+  seedAlbum: text("seed_album"),
+  spotifyTrackId: integer("spotify_track_id").references(() => spotifyTracks.id, { onDelete: "set null" }),
+  spotifyUri: text("spotify_uri"),
+  isrc: text("isrc"),
+  coverUrl: text("cover_url"),
+  spotifyPlaylistNames: text("spotify_playlist_names"), // JSON array
+  status: text("status").notNull().default("pending"), // "pending" | "downloading" | "completed" | "dismissed"
+  createdAt: text("created_at").default(sql`(datetime('now'))`),
+});
+
+export type SpotifyAuth = typeof spotifyAuth.$inferSelect;
+export type SpotifySnapshot = typeof spotifySnapshots.$inferSelect;
+export type SpotifyPlaylist = typeof spotifyPlaylists.$inferSelect;
+export type SpotifyTrack = typeof spotifyTracks.$inferSelect;
+export type WishListItem = typeof wishList.$inferSelect;

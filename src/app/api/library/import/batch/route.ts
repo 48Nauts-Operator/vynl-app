@@ -18,11 +18,8 @@ interface FolderResult {
   elapsed?: number;
 }
 
-// Track the currently running beet process so we can kill it on cancel
-let activeProcess: ChildProcess | null = null;
-
-// In-memory job state (survives across requests within the same server process)
-let currentJob: {
+// Job state type
+interface ImportJob {
   id: string;
   status: "running" | "complete" | "error" | "cancelled";
   total: number;
@@ -35,15 +32,32 @@ let currentJob: {
   folderStartedAt: number;
   completedAt?: number;
   error?: string;
-} | null = null;
+}
+
+// ── Persist state on globalThis so it survives Next.js dev-mode hot-reloads ──
+// Module-level variables reset when the module is re-evaluated during HMR,
+// but globalThis persists for the lifetime of the Node process.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const _g = globalThis as any;
+if (_g.importJob === undefined) _g.importJob = null;
+if (_g.activeProcess === undefined) _g.activeProcess = null;
+
+// Typed accessors for globalThis-persisted state
+const g = {
+  get importJob(): ImportJob | null { return _g.importJob; },
+  set importJob(v: ImportJob | null) { _g.importJob = v; },
+  get activeProcess(): ChildProcess | null { return _g.activeProcess; },
+  set activeProcess(v: ChildProcess | null) { _g.activeProcess = v; },
+};
 
 /** Append a line to the job log buffer (ring buffer) */
 function log(line: string) {
-  if (!currentJob) return;
+  const job = g.importJob;
+  if (!job) return;
   const ts = new Date().toLocaleTimeString("en-GB", { hour12: false });
-  currentJob.logs.push(`[${ts}] ${line}`);
-  if (currentJob.logs.length > MAX_LOG_LINES) {
-    currentJob.logs = currentJob.logs.slice(-MAX_LOG_LINES);
+  job.logs.push(`[${ts}] ${line}`);
+  if (job.logs.length > MAX_LOG_LINES) {
+    job.logs = job.logs.slice(-MAX_LOG_LINES);
   }
 }
 
@@ -116,7 +130,7 @@ function runBeetImport(args: string[], folder: string): Promise<{ code: number; 
       stdio: ["pipe", "pipe", "pipe"],
     });
 
-    activeProcess = proc;
+    g.activeProcess = proc;
 
     // Close stdin immediately so beets never blocks waiting for interactive input (Y/n prompts)
     proc.stdin.end();
@@ -142,12 +156,12 @@ function runBeetImport(args: string[], folder: string): Promise<{ code: number; 
     });
 
     proc.on("close", (code) => {
-      activeProcess = null;
+      g.activeProcess = null;
       resolve({ code: code ?? 1, stderr });
     });
 
     proc.on("error", (err) => {
-      activeProcess = null;
+      g.activeProcess = null;
       stderr += err.message;
       log(`  ✗ Process error: ${err.message}`);
       resolve({ code: 1, stderr });
@@ -195,7 +209,8 @@ function removeEmptyDir(dirPath: string): boolean {
 
 /** Run the import in the background — not tied to any HTTP response */
 async function runImportJob(folders: string[]) {
-  if (!currentJob) return;
+  const job = g.importJob;
+  if (!job) return;
 
   const beetsDbPath = process.env.BEETS_DB_PATH || path.join(os.homedir(), ".config", "beets", "library.db");
 
@@ -213,14 +228,14 @@ async function runImportJob(folders: string[]) {
   try {
     for (let i = 0; i < folders.length; i++) {
       // Check for cancellation before starting each folder
-      if (currentJob.status === "cancelled") {
+      if (job.status === "cancelled") {
         log("");
         log("━━━ CANCELLED by user ━━━");
-        const succeeded = currentJob.results.filter((r) => r.success).length;
-        const failed = currentJob.results.filter((r) => !r.success).length;
+        const succeeded = job.results.filter((r) => r.success).length;
+        const failed = job.results.filter((r) => !r.success).length;
         log(`${succeeded} succeeded, ${failed} failed before cancellation`);
-        currentJob.completedAt = Date.now();
-        currentJob.currentFolder = "";
+        job.completedAt = Date.now();
+        job.currentFolder = "";
         return;
       }
 
@@ -228,9 +243,9 @@ async function runImportJob(folders: string[]) {
       const folderName = path.basename(folder);
       const audioCount = countAudioFiles(folder);
 
-      currentJob.current = i + 1;
-      currentJob.currentFolder = folderName;
-      currentJob.folderStartedAt = Date.now();
+      job.current = i + 1;
+      job.currentFolder = folderName;
+      job.folderStartedAt = Date.now();
 
       log(`━━━ [${i + 1}/${folders.length}] ${folderName} (${audioCount} audio files) ━━━`);
 
@@ -293,9 +308,9 @@ async function runImportJob(folders: string[]) {
         }
       }
 
-      const elapsed = Date.now() - currentJob.folderStartedAt;
+      const elapsed = Date.now() - job.folderStartedAt;
 
-      currentJob.results.push({
+      job.results.push({
         folder: folderName,
         success,
         tracks: tracksImported > 0 ? tracksImported : undefined,
@@ -308,8 +323,8 @@ async function runImportJob(folders: string[]) {
     }
 
     // Post-processing
-    currentJob.postProcessing = true;
-    currentJob.currentFolder = "Post-processing...";
+    job.postProcessing = true;
+    job.currentFolder = "Post-processing...";
     log("");
     log("━━━ Post-processing ━━━");
     log("→ Scanning library & syncing database...");
@@ -343,23 +358,24 @@ async function runImportJob(folders: string[]) {
       log(`⚠ Cover rescan failed: ${err}`);
     }
 
-    const succeeded = currentJob.results.filter((r) => r.success).length;
-    const failed = currentJob.results.filter((r) => !r.success).length;
-    const totalTracks = currentJob.results.reduce((sum, r) => sum + (r.tracks || 0), 0);
+    const succeeded = job.results.filter((r) => r.success).length;
+    const failed = job.results.filter((r) => !r.success).length;
+    const totalTracks = job.results.reduce((sum, r) => sum + (r.tracks || 0), 0);
 
     log("");
     log(`━━━ COMPLETE ━━━`);
     log(`${succeeded} succeeded, ${failed} failed, ${totalTracks} total tracks imported`);
 
-    currentJob.status = "complete";
-    currentJob.postProcessing = false;
-    currentJob.completedAt = Date.now();
-    currentJob.currentFolder = "";
+    job.status = "complete";
+    job.postProcessing = false;
+    job.completedAt = Date.now();
+    job.currentFolder = "";
   } catch (err) {
-    if (currentJob) {
-      currentJob.status = "error";
-      currentJob.error = String(err);
-      currentJob.completedAt = Date.now();
+    const j = g.importJob;
+    if (j) {
+      j.status = "error";
+      j.error = String(err);
+      j.completedAt = Date.now();
       log(`✗ Fatal error: ${err}`);
     }
   }
@@ -367,14 +383,16 @@ async function runImportJob(folders: string[]) {
 
 /** POST — kick off a new batch import job */
 export async function POST(request: NextRequest) {
+  const job = g.importJob;
+
   // Reject if a job is already running
-  if (currentJob && currentJob.status === "running") {
+  if (job && job.status === "running") {
     return NextResponse.json(
       {
         error: "A batch import is already running",
-        jobId: currentJob.id,
-        current: currentJob.current,
-        total: currentJob.total,
+        jobId: job.id,
+        current: job.current,
+        total: job.total,
       },
       { status: 409 }
     );
@@ -409,7 +427,7 @@ export async function POST(request: NextRequest) {
 
   const jobId = `import-${Date.now()}`;
 
-  currentJob = {
+  g.importJob = {
     id: jobId,
     status: "running",
     total: folders.length,
@@ -439,57 +457,62 @@ export async function POST(request: NextRequest) {
 
 /** GET — poll for current job status */
 export async function GET(request: NextRequest) {
-  if (!currentJob) {
+  const job = g.importJob;
+
+  if (!job) {
     return NextResponse.json({ status: "idle", message: "No import job running" });
   }
 
-  const succeeded = currentJob.results.filter((r) => r.success).length;
-  const failed = currentJob.results.filter((r) => !r.success).length;
+  const succeeded = job.results.filter((r) => r.success).length;
+  const failed = job.results.filter((r) => !r.success).length;
 
   // Support log pagination: ?since=N returns logs from index N onward
   const url = new URL(request.url);
   const since = parseInt(url.searchParams.get("since") || "0", 10);
-  const logs = currentJob.logs.slice(since);
+  const logs = job.logs.slice(since);
 
   // Elapsed time for currently-processing folder
-  const folderElapsed = currentJob.status === "running" && currentJob.folderStartedAt
-    ? Date.now() - currentJob.folderStartedAt
+  const folderElapsed = job.status === "running" && job.folderStartedAt
+    ? Date.now() - job.folderStartedAt
     : undefined;
 
   return NextResponse.json({
-    jobId: currentJob.id,
-    status: currentJob.status,
-    total: currentJob.total,
-    current: currentJob.current,
-    currentFolder: currentJob.currentFolder,
-    postProcessing: currentJob.postProcessing,
+    jobId: job.id,
+    status: job.status,
+    total: job.total,
+    current: job.current,
+    currentFolder: job.currentFolder,
+    postProcessing: job.postProcessing,
     succeeded,
     failed,
-    results: currentJob.results,
+    results: job.results,
     logs,
     logOffset: since,
-    totalLogs: currentJob.logs.length,
+    totalLogs: job.logs.length,
     folderElapsed,
-    startedAt: currentJob.startedAt,
-    completedAt: currentJob.completedAt,
-    error: currentJob.error,
+    startedAt: job.startedAt,
+    completedAt: job.completedAt,
+    error: job.error,
   });
 }
 
 /** DELETE — cancel the running import job */
 export async function DELETE() {
-  if (!currentJob || currentJob.status !== "running") {
+  const job = g.importJob;
+
+  if (!job || job.status !== "running") {
     return NextResponse.json({ error: "No running import to cancel" }, { status: 400 });
   }
 
   // Set the cancelled flag — the import loop checks this between folders
-  currentJob.status = "cancelled";
+  job.status = "cancelled";
   log("⛔ Cancel requested by user");
 
   // Kill the currently running beet process immediately
-  if (activeProcess) {
+  const proc = g.activeProcess;
+  if (proc) {
     try {
-      activeProcess.kill("SIGTERM");
+      proc.kill("SIGTERM");
       log("⛔ Killed active beet process");
     } catch {
       // Process may have already exited
@@ -498,7 +521,7 @@ export async function DELETE() {
 
   return NextResponse.json({
     message: "Import cancellation requested",
-    completed: currentJob.results.length,
-    remaining: currentJob.total - currentJob.results.length,
+    completed: job.results.length,
+    remaining: job.total - job.results.length,
   });
 }

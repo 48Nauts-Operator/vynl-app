@@ -13,6 +13,7 @@ export interface ScannedTrack {
   format: string;
   bitrate?: number;
   sampleRate?: number;
+  isrc?: string;
   coverData?: {
     data: Buffer;
     format: string;

@@ -1,6 +1,8 @@
 services:
   vynl:
-    build: .
+    image: ghcr.io/48nauts-operator/vynl-app:latest
+    # To build locally instead of pulling, comment out 'image' and uncomment 'build':
+    # build: .
     container_name: vynl
     restart: unless-stopped
     ports:

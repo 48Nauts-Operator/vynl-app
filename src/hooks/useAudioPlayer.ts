@@ -8,17 +8,24 @@ export function useAudioPlayer() {
   const historyRecorded = useRef(false);
   const sonosPlayUriSent = useRef(false);
   const trackChangedAt = useRef(0);
+  // Preview mode: "ending" = playing tail of track, "starting" = playing head of track
+  const previewPhase = useRef<"ending" | "starting">("ending");
+  const previewSeeked = useRef(false); // guard against double-seeking
   const {
     currentTrack,
     isPlaying,
     volume,
     outputTarget,
     sonosSpeaker,
+    previewMode,
+    previewDuration,
     setCurrentTime,
     setDuration,
     setIsPlaying,
+    setVolume,
     playNext,
   } = usePlayerStore();
+  const lastVolumeSentAt = useRef(0);
 
   // Initialize audio element
   useEffect(() => {
@@ -37,8 +44,16 @@ export function useAudioPlayer() {
     if (!audio || !currentTrack) return;
 
     trackChangedAt.current = Date.now();
+    previewSeeked.current = false; // reset for new track
 
     if (outputTarget === "browser" && (currentTrack.filePath || currentTrack.streamUrl)) {
+      // DJ crossfade hook handles browser audio in preview mode
+      if (previewMode) {
+        audio.pause();
+        audio.removeAttribute("src");
+        return;
+      }
+
       const audioUrl = currentTrack.filePath
         ? `/api/audio${currentTrack.filePath}`
         : currentTrack.streamUrl!;
@@ -47,13 +62,12 @@ export function useAudioPlayer() {
       historyRecorded.current = false;
 
       if (isPlaying) {
-        audio.play().catch(console.error);
+        audio.play().catch(() => {});
       }
     } else if (outputTarget === "sonos" && sonosSpeaker) {
-      // Stop browser audio and clear source to prevent error events
+      // Stop browser audio — don't call load() after removing src as it fires error events
       audio.pause();
       audio.removeAttribute("src");
-      audio.load();
 
       // Send to Sonos via API
       const vynlHost = process.env.NEXT_PUBLIC_VYNL_HOST || window.location.origin;
@@ -90,7 +104,26 @@ export function useAudioPlayer() {
         }).catch(console.error);
       }
     }
-  }, [currentTrack, outputTarget, sonosSpeaker]);
+  }, [currentTrack, outputTarget, sonosSpeaker, previewMode]);
+
+  // Preview mode: seek immediately when toggled on mid-track (browser only)
+  const prevPreviewMode = useRef(previewMode);
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || outputTarget !== "browser") {
+      prevPreviewMode.current = previewMode;
+      return;
+    }
+
+    // Just toggled preview ON — seek to the ending of current track
+    if (previewMode && !prevPreviewMode.current && audio.duration > 0) {
+      previewPhase.current = "ending";
+      const seekTo = Math.max(0, audio.duration - previewDuration);
+      audio.currentTime = seekTo;
+    }
+
+    prevPreviewMode.current = previewMode;
+  }, [previewMode, previewDuration, outputTarget]);
 
   // Handle play/pause (user-initiated toggle only)
   const prevIsPlaying = useRef(isPlaying);
@@ -103,8 +136,9 @@ export function useAudioPlayer() {
     prevIsPlaying.current = isPlaying;
 
     if (outputTarget === "browser") {
+      if (previewMode) return; // crossfade hook handles it
       if (isPlaying) {
-        audio.play().catch(console.error);
+        audio.play().catch(() => {});
       } else {
         audio.pause();
       }
@@ -151,6 +185,14 @@ export function useAudioPlayer() {
         if (duration > 0) setDuration(duration);
         setCurrentTime(position);
 
+        // Sync volume from Sonos (skip if we recently sent a volume change to avoid loop)
+        if (data.volume !== undefined && Date.now() - lastVolumeSentAt.current > 3000) {
+          const sonosVol = Number(data.volume) / 100;
+          if (Math.abs(sonosVol - usePlayerStore.getState().volume) > 0.02) {
+            setVolume(sonosVol);
+          }
+        }
+
         // Detect if Sonos stopped (track ended)
         // Skip detection within 5s of a track change to avoid race with play-uri
         const sinceTrackChange = Date.now() - trackChangedAt.current;
@@ -168,21 +210,49 @@ export function useAudioPlayer() {
   }, [outputTarget, sonosSpeaker, currentTrack, isPlaying, setCurrentTime, setDuration, playNext]);
 
   // Handle volume
+  const prevVolume = useRef(volume);
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.volume = volume;
     }
-  }, [volume]);
+    // Send volume to Sonos when in Sonos mode
+    if (outputTarget === "sonos" && sonosSpeaker && prevVolume.current !== volume) {
+      lastVolumeSentAt.current = Date.now();
+      const sonosVol = Math.round(volume * 100);
+      fetch("/api/sonos/volume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ speaker: sonosSpeaker, volume: sonosVol }),
+      }).catch(() => {});
+    }
+    prevVolume.current = volume;
+  }, [volume, outputTarget, sonosSpeaker]);
 
   // Audio event listeners
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
+    // DJ crossfade hook handles all audio events in preview mode
+    if (previewMode && outputTarget === "browser") return;
 
     let lastPositionSave = 0;
 
     const onTimeUpdate = () => {
       setCurrentTime(audio.currentTime);
+
+      // Preview mode: handle phase transitions (browser only)
+      if (previewMode && outputTarget === "browser" && audio.duration > 0) {
+        if (previewPhase.current === "starting") {
+          // Playing head: after previewDuration seconds, seek to the ending
+          if (audio.currentTime >= previewDuration) {
+            previewPhase.current = "ending";
+            previewSeeked.current = false;
+            const seekTo = Math.max(0, audio.duration - previewDuration);
+            audio.currentTime = seekTo;
+          }
+        }
+        // "ending" phase: the 'ended' event handles advancing to next track
+      }
 
       // Save podcast play position every 30 seconds
       if (
@@ -199,8 +269,8 @@ export function useAudioPlayer() {
         }).catch(() => {});
       }
 
-      // Record to history after 30s of playback
-      if (audio.currentTime > 30 && !historyRecorded.current && currentTrack) {
+      // Record to history after 30s of playback (skip in preview mode)
+      if (!previewMode && audio.currentTime > 30 && !historyRecorded.current && currentTrack) {
         historyRecorded.current = true;
         fetch("/api/library/history", {
           method: "POST",
@@ -220,9 +290,35 @@ export function useAudioPlayer() {
 
     const onLoadedMetadata = () => {
       setDuration(audio.duration);
+
+      // Preview mode: seek to the ending segment on track load
+      if (previewMode && outputTarget === "browser" && audio.duration > 0 && !previewSeeked.current) {
+        if (previewPhase.current === "ending") {
+          previewSeeked.current = true;
+          const seekTo = Math.max(0, audio.duration - previewDuration);
+          audio.currentTime = seekTo;
+        }
+        // "starting" phase: play from 0:00 (default), no seek needed
+      }
+    };
+
+    // Also handle 'canplay' for preview seek — some browsers don't allow seeking on loadedmetadata
+    const onCanPlay = () => {
+      if (previewMode && outputTarget === "browser" && audio.duration > 0 && !previewSeeked.current) {
+        if (previewPhase.current === "ending") {
+          previewSeeked.current = true;
+          const seekTo = Math.max(0, audio.duration - previewDuration);
+          audio.currentTime = seekTo;
+        }
+      }
     };
 
     const onEnded = () => {
+      // In preview mode, next track starts with its "starting" (head) phase
+      if (previewMode) {
+        previewPhase.current = "starting";
+        previewSeeked.current = false;
+      }
       playNext();
     };
 
@@ -230,24 +326,27 @@ export function useAudioPlayer() {
       // Only stop playback for browser mode — in Sonos mode, HTML5 Audio errors
       // are expected (no browser source for Spotify/radio tracks)
       const { outputTarget: currentOutput } = usePlayerStore.getState();
-      if (currentOutput === "browser") {
-        console.error("Audio playback error");
-        setIsPlaying(false);
-      }
+      if (currentOutput !== "browser") return;
+      // Ignore errors when there's no source (e.g. initial state, source cleared)
+      if (!audio.src || audio.src === window.location.href) return;
+      console.warn("Audio playback error:", audio.error?.message || "unknown");
+      setIsPlaying(false);
     };
 
     audio.addEventListener("timeupdate", onTimeUpdate);
     audio.addEventListener("loadedmetadata", onLoadedMetadata);
+    audio.addEventListener("canplay", onCanPlay);
     audio.addEventListener("ended", onEnded);
     audio.addEventListener("error", onError);
 
     return () => {
       audio.removeEventListener("timeupdate", onTimeUpdate);
       audio.removeEventListener("loadedmetadata", onLoadedMetadata);
+      audio.removeEventListener("canplay", onCanPlay);
       audio.removeEventListener("ended", onEnded);
       audio.removeEventListener("error", onError);
     };
-  }, [currentTrack, outputTarget, setCurrentTime, setDuration, setIsPlaying, playNext]);
+  }, [currentTrack, outputTarget, previewMode, previewDuration, setCurrentTime, setDuration, setIsPlaying, playNext]);
 
   const seek = useCallback(
     (time: number) => {

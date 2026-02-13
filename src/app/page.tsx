@@ -146,25 +146,11 @@ export default function HomePage() {
     return () => { active = false; clearInterval(interval); };
   }, []);
 
-  const container = {
-    hidden: { opacity: 0 },
-    show: { opacity: 1, transition: { staggerChildren: 0.1 } },
-  };
-  const item = {
-    hidden: { opacity: 0, y: 20 },
-    show: { opacity: 1, y: 0 },
-  };
-
   const hasStats = stats && stats.topTracks.length >= 3;
 
   return (
-    <motion.div
-      variants={container}
-      initial="hidden"
-      animate="show"
-      className="space-y-8"
-    >
-      <motion.div variants={item} className="flex items-center justify-between">
+    <div className="space-y-5">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Welcome to Vynl</h1>
           <p className="text-muted-foreground mt-1">
@@ -181,7 +167,7 @@ export default function HomePage() {
 
       {/* Background Jobs */}
       {importJob.status !== "idle" && (
-        <motion.div variants={item}>
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
           <Card className={importJob.status === "running" ? "border-primary/40" : ""}>
             <CardContent className="p-5">
               <div className="flex items-center gap-3 mb-3">
@@ -244,18 +230,19 @@ export default function HomePage() {
 
       {/* Quick Stats */}
       <motion.div
-        variants={item}
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
         className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
       >
         <Link href="/library">
           <Card className="hover:bg-secondary/50 transition-colors cursor-pointer">
-            <CardContent className="flex items-center gap-4 p-6">
-              <div className="p-3 rounded-lg bg-primary/10">
-                <Music className="h-6 w-6 text-primary" />
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="p-2 rounded-lg bg-primary/10">
+                <Music className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{trackCount}</p>
-                <p className="text-sm text-muted-foreground">Tracks</p>
+                <p className="text-xl font-bold">{trackCount}</p>
+                <p className="text-xs text-muted-foreground">Tracks</p>
               </div>
             </CardContent>
           </Card>
@@ -263,13 +250,13 @@ export default function HomePage() {
 
         <Link href="/playlists">
           <Card className="hover:bg-secondary/50 transition-colors cursor-pointer">
-            <CardContent className="flex items-center gap-4 p-6">
-              <div className="p-3 rounded-lg bg-primary/10">
-                <ListMusic className="h-6 w-6 text-primary" />
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="p-2 rounded-lg bg-primary/10">
+                <ListMusic className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{playlists.length}</p>
-                <p className="text-sm text-muted-foreground">Playlists</p>
+                <p className="text-xl font-bold">{playlists.length}</p>
+                <p className="text-xs text-muted-foreground">Playlists</p>
               </div>
             </CardContent>
           </Card>
@@ -277,13 +264,13 @@ export default function HomePage() {
 
         <Link href="/discover">
           <Card className="hover:bg-secondary/50 transition-colors cursor-pointer">
-            <CardContent className="flex items-center gap-4 p-6">
-              <div className="p-3 rounded-lg bg-primary/10">
-                <Compass className="h-6 w-6 text-primary" />
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="p-2 rounded-lg bg-primary/10">
+                <Compass className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <p className="text-2xl font-bold">Discover</p>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-xl font-bold">Discover</p>
+                <p className="text-xs text-muted-foreground">
                   {profileExists ? "Profile active" : "Start session"}
                 </p>
               </div>
@@ -293,26 +280,26 @@ export default function HomePage() {
 
         {hasStats ? (
           <Card>
-            <CardContent className="flex items-center gap-4 p-6">
-              <div className="p-3 rounded-lg bg-primary/10">
-                <Headphones className="h-6 w-6 text-primary" />
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="p-2 rounded-lg bg-primary/10">
+                <Headphones className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{stats.totalListeningHours}h</p>
-                <p className="text-sm text-muted-foreground">Listened (4w)</p>
+                <p className="text-xl font-bold">{stats.totalListeningHours}h</p>
+                <p className="text-xs text-muted-foreground">Listened (4w)</p>
               </div>
             </CardContent>
           </Card>
         ) : (
           <Link href="/speakers">
             <Card className="hover:bg-secondary/50 transition-colors cursor-pointer">
-              <CardContent className="flex items-center gap-4 p-6">
-                <div className="p-3 rounded-lg bg-primary/10">
-                  <Speaker className="h-6 w-6 text-primary" />
+              <CardContent className="flex items-center gap-3 p-4">
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <Speaker className="h-5 w-5 text-primary" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">Speakers</p>
-                  <p className="text-sm text-muted-foreground">Manage output</p>
+                  <p className="text-xl font-bold">Speakers</p>
+                  <p className="text-xs text-muted-foreground">Manage output</p>
                 </div>
               </CardContent>
             </Card>
@@ -322,7 +309,7 @@ export default function HomePage() {
 
       {/* Heavy Rotation */}
       {heavyRotation && heavyRotation.tracks.length > 0 && (
-        <motion.div variants={item}>
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
           <div className="flex items-center gap-2 mb-4">
             <TrendingUp className="h-5 w-5 text-primary" />
             <h2 className="text-xl font-semibold">Heavy Rotation</h2>
@@ -365,7 +352,7 @@ export default function HomePage() {
 
       {/* Most Played Songs */}
       {hasStats && (
-        <motion.div variants={item}>
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
           <div className="flex items-center gap-2 mb-4">
             <TrendingUp className="h-5 w-5 text-primary" />
             <h2 className="text-xl font-semibold">Most Played Songs</h2>
@@ -408,7 +395,7 @@ export default function HomePage() {
 
       {/* Top Albums */}
       {hasStats && stats.topAlbums.length > 0 && (
-        <motion.div variants={item}>
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
           <div className="flex items-center gap-2 mb-4">
             <Disc3 className="h-5 w-5 text-primary" />
             <h2 className="text-xl font-semibold">Top Albums</h2>
@@ -451,7 +438,7 @@ export default function HomePage() {
 
       {/* Quick Playlists */}
       {playlists.length > 0 && (
-        <motion.div variants={item}>
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
           <h2 className="text-xl font-semibold mb-4">Your Playlists</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
             {playlists.slice(0, 5).map((pl) => (
@@ -491,8 +478,8 @@ export default function HomePage() {
       )}
 
       {/* Recently Played */}
-      <motion.div variants={item}>
-        <h2 className="text-xl font-semibold mb-4">Recently Played</h2>
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+        <h2 className="text-xl font-semibold mb-3">Recently Played</h2>
         {recentHistory.length > 0 ? (
           <Card>
             <CardContent className="p-0">
@@ -528,8 +515,8 @@ export default function HomePage() {
           </Card>
         ) : (
           <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-              <Clock className="h-12 w-12 text-muted-foreground mb-4" />
+            <CardContent className="flex flex-col items-center justify-center py-8 text-center">
+              <Clock className="h-10 w-10 text-muted-foreground mb-3" />
               <p className="text-muted-foreground">No listening history yet</p>
               <p className="text-sm text-muted-foreground mt-1">
                 Start playing music to build your history
@@ -541,6 +528,6 @@ export default function HomePage() {
           </Card>
         )}
       </motion.div>
-    </motion.div>
+    </div>
   );
 }

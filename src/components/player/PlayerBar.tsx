@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { usePlayerStore } from "@/store/player";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -144,7 +145,10 @@ export function PlayerBar() {
       {/* Left: Now Playing */}
       <div className="flex items-center gap-3 w-[280px] min-w-[180px]">
         {currentTrack ? (
-          <>
+          <Link
+            href={`/albums/${encodeURIComponent(`${currentTrack.albumArtist || currentTrack.artist}---${currentTrack.album}`)}`}
+            className="flex items-center gap-3 min-w-0 hover:opacity-80 transition-opacity"
+          >
             <div className="w-14 h-14 rounded bg-secondary flex items-center justify-center shrink-0 overflow-hidden">
               {currentTrack.coverPath ? (
                 <Image
@@ -166,7 +170,7 @@ export function PlayerBar() {
                 {currentTrack.artist}
               </p>
             </div>
-          </>
+          </Link>
         ) : (
           <div className="flex items-center gap-3">
             <div className="w-14 h-14 rounded bg-secondary flex items-center justify-center">

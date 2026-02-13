@@ -22,6 +22,14 @@ import {
   Music,
   Loader2,
   GripVertical,
+  ArrowLeft,
+  ArrowUpDown,
+  ChevronsUpDown,
+  ChevronUp,
+  ChevronDown,
+  LayoutList,
+  LayoutGrid,
+  Grid3X3,
 } from "lucide-react";
 import Image from "next/image";
 import { motion } from "framer-motion";
@@ -48,6 +56,9 @@ interface PlaylistTrack {
   position: number;
 }
 
+type SortField = "position" | "title" | "artist" | "album" | "duration";
+type SortDir = "asc" | "desc";
+
 export default function PlaylistsPage() {
   const [playlists, setPlaylists] = useState<PlaylistInfo[]>([]);
   const [selectedPlaylist, setSelectedPlaylist] = useState<number | null>(null);
@@ -58,6 +69,10 @@ export default function PlaylistsPage() {
   const [generating, setGenerating] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "table">("list");
+  const [overviewMode, setOverviewMode] = useState<"grid" | "list">("grid");
+  const [sortField, setSortField] = useState<SortField>("position");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
   const { setQueue } = usePlayerStore();
 
   const fetchPlaylists = useCallback(async () => {
@@ -116,7 +131,8 @@ export default function PlaylistsPage() {
   };
 
   const playPlaylist = (index = 0) => {
-    const tracks: PlayerTrack[] = playlistTracks.map((t) => ({
+    const sorted = getSortedTracks();
+    const tracks: PlayerTrack[] = sorted.map((t) => ({
       id: t.id,
       title: t.title,
       artist: t.artist,
@@ -129,7 +145,40 @@ export default function PlaylistsPage() {
     setQueue(tracks, index);
   };
 
+  const toggleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortDir("asc");
+    }
+  };
+
+  const getSortedTracks = () => {
+    if (sortField === "position") {
+      return sortDir === "asc"
+        ? [...playlistTracks]
+        : [...playlistTracks].reverse();
+    }
+    return [...playlistTracks].sort((a, b) => {
+      let cmp = 0;
+      if (sortField === "title") cmp = a.title.localeCompare(b.title);
+      else if (sortField === "artist") cmp = a.artist.localeCompare(b.artist);
+      else if (sortField === "album") cmp = a.album.localeCompare(b.album);
+      else if (sortField === "duration") cmp = a.duration - b.duration;
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  };
+
+  const SortIcon = ({ field }: { field: SortField }) => {
+    if (sortField !== field) return <ChevronsUpDown className="h-3 w-3 opacity-40" />;
+    return sortDir === "asc"
+      ? <ChevronUp className="h-3 w-3" />
+      : <ChevronDown className="h-3 w-3" />;
+  };
+
   const currentPlaylist = playlists.find((p) => p.id === selectedPlaylist);
+  const sortedTracks = getSortedTracks();
 
   return (
     <div className="space-y-6">
@@ -140,7 +189,27 @@ export default function PlaylistsPage() {
             {playlists.length} playlists
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {!selectedPlaylist && (
+            <div className="flex border border-border rounded-md mr-1">
+              <Button
+                variant={overviewMode === "grid" ? "secondary" : "ghost"}
+                size="icon"
+                className="h-8 w-8 rounded-r-none"
+                onClick={() => setOverviewMode("grid")}
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={overviewMode === "list" ? "secondary" : "ghost"}
+                size="icon"
+                className="h-8 w-8 rounded-l-none"
+                onClick={() => setOverviewMode("list")}
+              >
+                <LayoutList className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
           <Dialog open={generateDialogOpen} onOpenChange={setGenerateDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline">
@@ -210,7 +279,7 @@ export default function PlaylistsPage() {
       </div>
 
       <div className="flex gap-6">
-        {/* Playlist Grid */}
+        {/* Playlist Grid / Detail */}
         <div className="flex-1">
           {selectedPlaylist ? (
             <motion.div
@@ -218,148 +287,225 @@ export default function PlaylistsPage() {
               animate={{ opacity: 1 }}
               className="space-y-4"
             >
-              <div className="flex items-center gap-4">
+              {/* Header with back button */}
+              <div className="flex items-center gap-3">
                 <Button
-                  variant="ghost"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 shrink-0"
                   onClick={() => {
                     setSelectedPlaylist(null);
                     setPlaylistTracks([]);
+                    setSortField("position");
+                    setSortDir("asc");
                   }}
                 >
-                  Back
+                  <ArrowLeft className="h-4 w-4" />
                 </Button>
-                <div className="flex-1">
-                  <h2 className="text-2xl font-bold">
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-2xl font-bold truncate">
                     {currentPlaylist?.name}
                   </h2>
                   {currentPlaylist?.description && (
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-sm text-muted-foreground truncate">
                       {currentPlaylist.description}
                     </p>
                   )}
                 </div>
-                <Button onClick={() => playPlaylist()}>
-                  <Play className="h-4 w-4 mr-2" />
-                  Play All
-                </Button>
+                <div className="flex items-center gap-2">
+                  {/* View mode toggle */}
+                  <div className="flex border border-border rounded-md">
+                    <Button
+                      variant={viewMode === "list" ? "secondary" : "ghost"}
+                      size="icon"
+                      className="h-8 w-8 rounded-r-none"
+                      onClick={() => setViewMode("list")}
+                    >
+                      <LayoutList className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant={viewMode === "table" ? "secondary" : "ghost"}
+                      size="icon"
+                      className="h-8 w-8 rounded-l-none"
+                      onClick={() => setViewMode("table")}
+                    >
+                      <Grid3X3 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <Button onClick={() => playPlaylist()}>
+                    <Play className="h-4 w-4 mr-2" />
+                    Play All
+                  </Button>
+                </div>
               </div>
 
-              <Card>
-                <CardContent className="p-0">
-                  {playlistTracks.map((track, i) => (
-                    <div
-                      key={track.id}
-                      className="flex items-center gap-4 px-4 py-2 hover:bg-secondary/30 transition-colors cursor-pointer group"
-                      onClick={() => playPlaylist(i)}
-                    >
-                      <GripVertical className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100" />
-                      <span className="text-sm text-muted-foreground w-6 text-right group-hover:hidden">
-                        {i + 1}
-                      </span>
-                      <Play className="h-4 w-4 hidden group-hover:block text-primary" />
-                      <div className="w-10 h-10 rounded bg-secondary flex items-center justify-center shrink-0 overflow-hidden">
-                        {track.coverPath ? (
-                          <Image
-                            src={track.coverPath}
-                            alt={track.album}
-                            width={40}
-                            height={40}
-                            className="object-cover"
-                          />
-                        ) : (
-                          <Music className="h-4 w-4 text-muted-foreground" />
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">
-                          {track.title}
-                        </p>
-                        <p className="text-xs text-muted-foreground truncate">
-                          {track.artist}
-                        </p>
-                      </div>
-                      <span className="text-sm text-muted-foreground">
-                        {formatDuration(track.duration)}
-                      </span>
-                    </div>
-                  ))}
-                  {playlistTracks.length === 0 && (
-                    <div className="py-12 text-center text-muted-foreground">
-                      <ListMusic className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                      <p>This playlist is empty</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </motion.div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-              {playlists.map((pl, i) => (
-                <motion.div
-                  key={pl.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.05 }}
-                >
-                  <Card
-                    className="hover:bg-secondary/50 transition-colors cursor-pointer group relative"
-                    onClick={() => fetchPlaylistTracks(pl.id)}
-                  >
-                    <CardContent className="p-4">
-                      <div className="aspect-square rounded-lg bg-secondary mb-3 flex items-center justify-center overflow-hidden relative">
-                        {pl.coverPath ? (
-                          <Image
-                            src={pl.coverPath}
-                            alt={pl.name}
-                            fill
-                            className="object-cover"
-                          />
-                        ) : (
-                          <ListMusic className="h-10 w-10 text-muted-foreground" />
-                        )}
-                        <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Button
-                            size="icon"
-                            className="rounded-full h-10 w-10 shadow-lg"
-                          >
-                            <Play className="h-4 w-4 ml-0.5" />
-                          </Button>
+              {/* List View */}
+              {viewMode === "list" && (
+                <Card>
+                  <CardContent className="p-0">
+                    {sortedTracks.map((track, i) => (
+                      <div
+                        key={track.id}
+                        className="flex items-center gap-4 px-4 py-2 hover:bg-secondary/30 transition-colors cursor-pointer group"
+                        onClick={() => playPlaylist(i)}
+                      >
+                        <GripVertical className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100" />
+                        <span className="text-sm text-muted-foreground w-6 text-right group-hover:hidden">
+                          {track.position + 1}
+                        </span>
+                        <Play className="h-4 w-4 hidden group-hover:block text-primary" />
+                        <div className="w-10 h-10 rounded bg-secondary flex items-center justify-center shrink-0 overflow-hidden">
+                          {track.coverPath ? (
+                            <Image
+                              src={track.coverPath}
+                              alt={track.album}
+                              width={40}
+                              height={40}
+                              className="object-cover"
+                            />
+                          ) : (
+                            <Music className="h-4 w-4 text-muted-foreground" />
+                          )}
                         </div>
-                      </div>
-                      <div className="flex items-start justify-between">
-                        <div className="min-w-0 flex-1">
-                          <p className="font-medium truncate">{pl.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {pl.trackCount} tracks
-                            {pl.isAutoGenerated && (
-                              <Badge
-                                variant="outline"
-                                className="ml-2 text-xs"
-                              >
-                                AI
-                              </Badge>
-                            )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">
+                            {track.title}
+                          </p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {track.artist}
                           </p>
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 opacity-0 group-hover:opacity-100"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deletePlaylist(pl.id);
-                          }}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
+                        <span className="text-sm text-muted-foreground">
+                          {formatDuration(track.duration)}
+                        </span>
                       </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              ))}
+                    ))}
+                    {playlistTracks.length === 0 && (
+                      <div className="py-12 text-center text-muted-foreground">
+                        <ListMusic className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                        <p>This playlist is empty</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
 
-              {playlists.length === 0 && (
-                <div className="col-span-full py-16 text-center">
+              {/* Table View */}
+              {viewMode === "table" && (
+                <Card>
+                  <CardContent className="p-0">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-border text-left">
+                            <th className="px-4 py-3 w-12">
+                              <button
+                                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                                onClick={() => toggleSort("position")}
+                              >
+                                # <SortIcon field="position" />
+                              </button>
+                            </th>
+                            <th className="px-2 py-3 w-10"></th>
+                            <th className="px-2 py-3">
+                              <button
+                                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                                onClick={() => toggleSort("title")}
+                              >
+                                Title <SortIcon field="title" />
+                              </button>
+                            </th>
+                            <th className="px-2 py-3">
+                              <button
+                                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                                onClick={() => toggleSort("artist")}
+                              >
+                                Artist <SortIcon field="artist" />
+                              </button>
+                            </th>
+                            <th className="px-2 py-3">
+                              <button
+                                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                                onClick={() => toggleSort("album")}
+                              >
+                                Album <SortIcon field="album" />
+                              </button>
+                            </th>
+                            <th className="px-4 py-3 text-right">
+                              <button
+                                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground ml-auto"
+                                onClick={() => toggleSort("duration")}
+                              >
+                                Duration <SortIcon field="duration" />
+                              </button>
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sortedTracks.map((track, i) => (
+                            <tr
+                              key={track.id}
+                              className="border-b border-border/50 hover:bg-secondary/30 transition-colors cursor-pointer group"
+                              onClick={() => playPlaylist(i)}
+                            >
+                              <td className="px-4 py-2.5 text-muted-foreground">
+                                <span className="group-hover:hidden">{track.position + 1}</span>
+                                <Play className="h-4 w-4 hidden group-hover:block text-primary" />
+                              </td>
+                              <td className="px-2 py-2.5">
+                                <div className="w-8 h-8 rounded bg-secondary flex items-center justify-center shrink-0 overflow-hidden">
+                                  {track.coverPath ? (
+                                    <Image
+                                      src={track.coverPath}
+                                      alt={track.album}
+                                      width={32}
+                                      height={32}
+                                      className="object-cover"
+                                    />
+                                  ) : (
+                                    <Music className="h-3 w-3 text-muted-foreground" />
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-2 py-2.5">
+                                <p className="font-medium truncate max-w-[200px]">{track.title}</p>
+                              </td>
+                              <td className="px-2 py-2.5 text-muted-foreground">
+                                <p className="truncate max-w-[180px]">{track.artist}</p>
+                              </td>
+                              <td className="px-2 py-2.5 text-muted-foreground">
+                                <p className="truncate max-w-[180px]">{track.album}</p>
+                              </td>
+                              <td className="px-4 py-2.5 text-right text-muted-foreground">
+                                {formatDuration(track.duration)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {playlistTracks.length === 0 && (
+                        <div className="py-12 text-center text-muted-foreground">
+                          <ListMusic className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                          <p>This playlist is empty</p>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Track count summary */}
+              {playlistTracks.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {playlistTracks.length} tracks &middot;{" "}
+                  {formatDuration(playlistTracks.reduce((sum, t) => sum + t.duration, 0))} total
+                </p>
+              )}
+            </motion.div>
+          ) : (
+            <>
+              {playlists.length === 0 ? (
+                <div className="py-16 text-center">
                   <ListMusic className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
                   <p className="text-lg text-muted-foreground">
                     No playlists yet
@@ -368,8 +514,152 @@ export default function PlaylistsPage() {
                     Create one manually or let AI generate one for you
                   </p>
                 </div>
+              ) : overviewMode === "grid" ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {playlists.map((pl, i) => (
+                    <motion.div
+                      key={pl.id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.05 }}
+                    >
+                      <Card
+                        className="hover:bg-secondary/50 transition-colors cursor-pointer group relative"
+                        onClick={() => fetchPlaylistTracks(pl.id)}
+                      >
+                        <CardContent className="p-4">
+                          <div className="aspect-square rounded-lg bg-secondary mb-3 flex items-center justify-center overflow-hidden relative">
+                            {pl.coverPath ? (
+                              <Image
+                                src={pl.coverPath}
+                                alt={pl.name}
+                                fill
+                                className="object-cover"
+                              />
+                            ) : (
+                              <ListMusic className="h-10 w-10 text-muted-foreground" />
+                            )}
+                            <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Button
+                                size="icon"
+                                className="rounded-full h-10 w-10 shadow-lg"
+                              >
+                                <Play className="h-4 w-4 ml-0.5" />
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="flex items-start justify-between">
+                            <div className="min-w-0 flex-1">
+                              <p className="font-medium truncate">{pl.name}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {pl.trackCount} tracks
+                                {pl.isAutoGenerated && (
+                                  <Badge
+                                    variant="outline"
+                                    className="ml-2 text-xs"
+                                  >
+                                    AI
+                                  </Badge>
+                                )}
+                              </p>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deletePlaylist(pl.id);
+                              }}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </motion.div>
+                  ))}
+                </div>
+              ) : (
+                <Card>
+                  <CardContent className="p-0">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-border text-left">
+                            <th className="px-4 py-3 w-12"></th>
+                            <th className="px-2 py-3">Name</th>
+                            <th className="px-2 py-3">Description</th>
+                            <th className="px-2 py-3 text-center">Tracks</th>
+                            <th className="px-2 py-3">Type</th>
+                            <th className="px-4 py-3 text-right w-20">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {playlists.map((pl) => (
+                            <tr
+                              key={pl.id}
+                              className="border-b border-border/50 hover:bg-secondary/30 transition-colors cursor-pointer group"
+                              onClick={() => fetchPlaylistTracks(pl.id)}
+                            >
+                              <td className="px-4 py-2.5">
+                                <div className="w-10 h-10 rounded bg-secondary flex items-center justify-center shrink-0 overflow-hidden relative">
+                                  {pl.coverPath ? (
+                                    <Image
+                                      src={pl.coverPath}
+                                      alt={pl.name}
+                                      width={40}
+                                      height={40}
+                                      className="object-cover"
+                                    />
+                                  ) : (
+                                    <ListMusic className="h-4 w-4 text-muted-foreground" />
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-2 py-2.5">
+                                <p className="font-medium truncate max-w-[240px]">{pl.name}</p>
+                              </td>
+                              <td className="px-2 py-2.5 text-muted-foreground">
+                                <p className="truncate max-w-[280px]">{pl.description || "—"}</p>
+                              </td>
+                              <td className="px-2 py-2.5 text-center text-muted-foreground">
+                                {pl.trackCount}
+                              </td>
+                              <td className="px-2 py-2.5">
+                                {pl.isAutoGenerated ? (
+                                  <Badge variant="outline" className="text-xs">
+                                    <Sparkles className="h-3 w-3 mr-1" />
+                                    AI
+                                  </Badge>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">Manual</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      deletePlaylist(pl.id);
+                                    }}
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </CardContent>
+                </Card>
               )}
-            </div>
+            </>
           )}
         </div>
       </div>

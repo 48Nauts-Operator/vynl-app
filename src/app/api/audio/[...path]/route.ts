@@ -8,7 +8,16 @@ export async function GET(
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   const { path: pathSegments } = await params;
-  const filePath = "/" + pathSegments.join("/");
+  let filePath = "/" + pathSegments.join("/");
+
+  // Apply path remap (e.g. old DB entries with /Volumes/Music-1 → /Volumes/Music)
+  const pathRemap = process.env.BEETS_PATH_REMAP;
+  if (pathRemap) {
+    const [remapFrom, remapTo] = pathRemap.split("::");
+    if (remapFrom && remapTo && filePath.startsWith(remapFrom + "/")) {
+      filePath = remapTo + filePath.slice(remapFrom.length);
+    }
+  }
 
   if (!fs.existsSync(filePath)) {
     return NextResponse.json({ error: "File not found" }, { status: 404 });

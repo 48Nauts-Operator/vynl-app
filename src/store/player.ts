@@ -9,6 +9,7 @@ export interface Track {
   title: string;
   artist: string;
   album: string;
+  albumArtist?: string;
   duration: number;
   filePath?: string;
   coverPath?: string;
@@ -31,6 +32,9 @@ interface PlayerState {
   systemDevice: string | null;
   shuffled: boolean;
   repeatMode: "off" | "all" | "one";
+  previewMode: boolean;
+  previewDuration: number; // seconds per track segment
+  crossfadeProgress: number; // 0-1, >0 means crossfade in progress
 
   setTrack: (track: Track) => void;
   setQueue: (tracks: Track[], startIndex?: number) => void;
@@ -47,6 +51,8 @@ interface PlayerState {
   setSystemDevice: (device: string | null) => void;
   toggleShuffle: () => void;
   cycleRepeat: () => void;
+  setPreviewMode: (on: boolean, duration?: number) => void;
+  setCrossfadeProgress: (progress: number) => void;
 }
 
 export const usePlayerStore = create<PlayerState>((set, get) => ({
@@ -62,6 +68,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   systemDevice: null,
   shuffled: false,
   repeatMode: "off",
+  previewMode: false,
+  previewDuration: 10,
+  crossfadeProgress: 0,
 
   setTrack: (track) =>
     set({ currentTrack: track, isPlaying: true, currentTime: 0 }),
@@ -142,4 +151,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
             ? "one"
             : "off",
     })),
+  setPreviewMode: (on, duration) =>
+    set({ previewMode: on, ...(duration != null ? { previewDuration: duration } : {}) }),
+  setCrossfadeProgress: (progress) => set({ crossfadeProgress: progress }),
 }));

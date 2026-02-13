@@ -31,6 +31,9 @@ import {
   FolderUp,
   Ban,
   ClipboardCopy,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
 } from "lucide-react";
 import Image from "next/image";
 import { motion } from "framer-motion";
@@ -849,23 +852,38 @@ export default function LibraryPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [sortCol, setSortCol] = useState("title");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState<string | null>(null);
   const [view, setView] = useState<"tracks" | "albums" | "artists">("tracks");
   const [mainTab, setMainTab] = useState("browse");
   const { setQueue } = usePlayerStore();
 
+  // Read ?tab= param from URL on mount (e.g. from floating import status "View details" link)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tab = params.get("tab");
+      if (tab && ["browse", "import", "duplicates", "housekeeping"].includes(tab)) {
+        setMainTab(tab);
+      }
+    }
+  }, []);
+
   const fetchTracks = useCallback(async () => {
     const params = new URLSearchParams({
       search,
       page: page.toString(),
       limit: "50",
+      sort: sortCol,
+      dir: sortDir,
     });
     const res = await fetch(`/api/library?${params}`);
     const data = await res.json();
     setTracks(data.tracks || []);
     setTotal(data.total || 0);
-  }, [search, page]);
+  }, [search, page, sortCol, sortDir]);
 
   useEffect(() => {
     fetchTracks();
@@ -999,11 +1017,35 @@ export default function LibraryPage() {
             {view === "tracks" && (
               <Card>
                 <CardContent className="p-0">
-                  <div className="grid grid-cols-[40px_1fr_1fr_80px] gap-4 px-4 py-2 text-xs text-muted-foreground uppercase tracking-wider border-b border-border">
+                  <div className="grid grid-cols-[40px_1.2fr_0.8fr_0.8fr_70px] gap-4 px-4 py-2 text-xs text-muted-foreground uppercase tracking-wider border-b border-border">
                     <span>#</span>
-                    <span>Title</span>
-                    <span>Album</span>
-                    <span className="text-right">Duration</span>
+                    {([
+                      { key: "title", label: "Title", align: "" },
+                      { key: "artist", label: "Artist", align: "" },
+                      { key: "album", label: "Album", align: "" },
+                      { key: "duration", label: "Duration", align: "text-right ml-auto" },
+                    ] as const).map((col) => (
+                      <button
+                        key={col.key}
+                        className={`flex items-center gap-1 hover:text-foreground transition-colors ${col.align} ${sortCol === col.key ? "text-foreground" : ""}`}
+                        onClick={() => {
+                          if (sortCol === col.key) {
+                            setSortDir(sortDir === "asc" ? "desc" : "asc");
+                          } else {
+                            setSortCol(col.key);
+                            setSortDir(col.key === "duration" ? "desc" : "asc");
+                          }
+                          setPage(1);
+                        }}
+                      >
+                        {col.label}
+                        {sortCol === col.key ? (
+                          sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                        ) : (
+                          <ArrowUpDown className="h-3 w-3 opacity-30" />
+                        )}
+                      </button>
+                    ))}
                   </div>
                   {tracks.map((track, i) => (
                     <motion.div
@@ -1011,7 +1053,7 @@ export default function LibraryPage() {
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ delay: i * 0.02 }}
-                      className="grid grid-cols-[40px_1fr_1fr_80px] gap-4 px-4 py-2 hover:bg-secondary/30 transition-colors cursor-pointer group items-center"
+                      className="grid grid-cols-[40px_1.2fr_0.8fr_0.8fr_70px] gap-4 px-4 py-2 hover:bg-secondary/30 transition-colors cursor-pointer group items-center"
                       onClick={() => playTrack(track, i)}
                     >
                       <span className="text-sm text-muted-foreground group-hover:hidden">
@@ -1032,15 +1074,13 @@ export default function LibraryPage() {
                             <Music className="h-4 w-4 text-muted-foreground" />
                           )}
                         </div>
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium truncate">
-                            {track.title}
-                          </p>
-                          <p className="text-xs text-muted-foreground truncate">
-                            {track.artist}
-                          </p>
-                        </div>
+                        <p className="text-sm font-medium truncate min-w-0">
+                          {track.title}
+                        </p>
                       </div>
+                      <span className="text-sm text-muted-foreground truncate">
+                        {track.artist}
+                      </span>
                       <span className="text-sm text-muted-foreground truncate">
                         {track.album}
                       </span>

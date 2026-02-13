@@ -22,6 +22,10 @@ import {
   PartyPopper,
   Podcast,
   Youtube,
+  BarChart3,
+  MicVocal,
+  Headphones,
+  Heart,
 } from "lucide-react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -40,11 +44,14 @@ const navItems: Array<{
   { href: "/library", label: "Library", icon: Library },
   { href: "/albums", label: "Albums", icon: Disc3 },
   { href: "/artists", label: "Artists", icon: Mic2 },
+  { href: "/stats", label: "Stats", icon: BarChart3 },
   { href: "/discover", label: "Discover", icon: Compass, featureKey: "discover" },
   { href: "/playlists", label: "Playlists", icon: ListMusic, featureKey: "playlists" },
+  { href: "/wishlist", label: "Wishlist", icon: Heart },
   { href: "/podcasts", label: "Podcasts", icon: Podcast, featureKey: "podcasts" },
   { href: "/youtube", label: "YouTube", icon: Youtube, featureKey: "youtube" },
-  { href: "/party", label: "Party Mode", icon: PartyPopper, featureKey: "partyMode" },
+  { href: "/party", label: "AI DJ", icon: Headphones, featureKey: "partyMode" },
+  { href: "/karaoke", label: "Karaoke", icon: MicVocal, featureKey: "partyMode" },
   { href: "/profile", label: "Taste Profile", icon: User, featureKey: "tasteProfile" },
   { href: "/speakers", label: "Speakers", icon: Speaker },
   { href: "/settings", label: "Settings", icon: Settings },

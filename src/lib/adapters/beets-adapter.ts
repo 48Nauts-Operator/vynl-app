@@ -14,12 +14,14 @@ interface BeetsItem {
   year: number;
   track: number;
   disc: number;
+  comp: number;
   length: number;
   path: Buffer | string;
   format: string;
   bitrate: number;
   samplerate: number;
   artpath: Buffer | string | null;
+  isrc: string | null;
 }
 
 function hasColumn(db: Database.Database, table: string, column: string): boolean {
@@ -54,28 +56,33 @@ export class BeetsAdapter implements MusicSourceAdapter {
       // artpath may be on items (old Beets) or albums (Beets 2.x)
       const hasItemArtpath = hasColumn(beetsDb, "items", "artpath");
       const hasAlbumArtpath = hasColumn(beetsDb, "albums", "artpath");
+      const hasIsrc = hasColumn(beetsDb, "items", "isrc");
+      const isrcCol = hasIsrc ? "isrc" : "NULL as isrc";
 
       let query: string;
       if (hasItemArtpath) {
         query = `
           SELECT id, title, artist, album, albumartist, genre, year,
-                 track, disc, length, path, format, bitrate, samplerate, artpath
+                 track, disc, comp, length, path, format, bitrate, samplerate, artpath,
+                 ${isrcCol}
           FROM items
           ORDER BY albumartist, album, disc, track`;
       } else if (hasAlbumArtpath) {
         query = `
           SELECT items.id, items.title, items.artist, items.album, items.albumartist,
-                 items.genre, items.year, items.track, items.disc, items.length,
+                 items.genre, items.year, items.track, items.disc, items.comp, items.length,
                  items.path, items.format, items.bitrate, items.samplerate,
-                 albums.artpath
+                 albums.artpath,
+                 ${hasIsrc ? "items.isrc" : "NULL as isrc"}
           FROM items
           LEFT JOIN albums ON items.album_id = albums.id
           ORDER BY items.albumartist, items.album, items.disc, items.track`;
       } else {
         query = `
           SELECT id, title, artist, album, albumartist, genre, year,
-                 track, disc, length, path, format, bitrate, samplerate,
-                 NULL as artpath
+                 track, disc, comp, length, path, format, bitrate, samplerate,
+                 NULL as artpath,
+                 ${isrcCol}
           FROM items
           ORDER BY albumartist, album, disc, track`;
       }
@@ -98,7 +105,7 @@ export class BeetsAdapter implements MusicSourceAdapter {
         let filePath = decodePath(row.path);
         if (!filePath) continue;
 
-        if (remapFrom && remapTo && filePath.startsWith(remapFrom) && !filePath.startsWith(remapTo)) {
+        if (remapFrom && remapTo && filePath.startsWith(remapFrom + "/")) {
           filePath = remapTo + filePath.slice(remapFrom.length);
         }
 
@@ -115,7 +122,7 @@ export class BeetsAdapter implements MusicSourceAdapter {
         // Read cover art: try artpath first, fall back to embedded art
         let coverData: { data: Buffer; format: string } | undefined;
         let artPath = decodePath(row.artpath);
-        if (artPath && remapFrom && remapTo && artPath.startsWith(remapFrom) && !artPath.startsWith(remapTo)) {
+        if (artPath && remapFrom && remapTo && artPath.startsWith(remapFrom + "/")) {
           artPath = remapTo + artPath.slice(remapFrom.length);
         }
         if (artPath) {
@@ -149,11 +156,16 @@ export class BeetsAdapter implements MusicSourceAdapter {
           }
         }
 
+        // If beets flagged as compilation, set albumArtist to "Various Artists"
+        const albumArtist = row.comp
+          ? "Various Artists"
+          : (row.albumartist || undefined);
+
         yield {
           title: row.title || path.basename(filePath, path.extname(filePath)),
           artist: row.artist || "Unknown Artist",
           album: row.album || "Unknown Album",
-          albumArtist: row.albumartist || undefined,
+          albumArtist,
           genre: row.genre || undefined,
           year: row.year || undefined,
           trackNumber: row.track || undefined,
@@ -164,6 +176,7 @@ export class BeetsAdapter implements MusicSourceAdapter {
           format: row.format?.toUpperCase() || ext.toUpperCase(),
           bitrate: row.bitrate || undefined,
           sampleRate: row.samplerate || undefined,
+          isrc: row.isrc || undefined,
           coverData,
         };
       }

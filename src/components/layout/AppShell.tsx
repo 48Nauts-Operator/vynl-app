@@ -11,6 +11,11 @@ const PlayerBar = dynamic(
   { ssr: false }
 );
 
+const GlobalImportStatus = dynamic(
+  () => import("./GlobalImportStatus").then((m) => m.GlobalImportStatus),
+  { ssr: false }
+);
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [showSplash, setShowSplash] = useState(false);
 
@@ -36,6 +41,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </main>
         </div>
         <PlayerBar />
+        <GlobalImportStatus />
       </div>
     </TooltipProvider>
   );

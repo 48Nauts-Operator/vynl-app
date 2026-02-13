@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useEffect, useState, useMemo } from "react";
+import React, { useRef, useEffect, useState, useMemo, useCallback } from "react";
 import { motion } from "framer-motion";
 import type { LyricLine } from "@/hooks/useLyrics";
 
@@ -89,22 +89,33 @@ function SyncedLyrics({
   activeIndex: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const activeRef = useRef<HTMLDivElement>(null);
+  const lineRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const [offset, setOffset] = useState(0);
 
-  // Auto-scroll to keep active line centered
-  useEffect(() => {
-    if (activeRef.current && containerRef.current) {
-      const container = containerRef.current;
-      const active = activeRef.current;
-      const containerHeight = container.clientHeight;
-      const scrollTarget = active.offsetTop - containerHeight / 2 + active.clientHeight / 2;
+  // Measure and calculate offset to center the active line
+  const updateOffset = useCallback(() => {
+    if (!containerRef.current || activeIndex < 0) return;
+    const container = containerRef.current;
+    const activeLine = lineRefs.current[activeIndex];
+    if (!activeLine) return;
 
-      container.scrollTo({
-        top: scrollTarget,
-        behavior: "smooth",
-      });
-    }
+    const containerHeight = container.clientHeight;
+    const lineTop = activeLine.offsetTop;
+    const lineHeight = activeLine.clientHeight;
+
+    // Move the content so the active line sits at vertical center
+    setOffset(-(lineTop - containerHeight / 2 + lineHeight / 2));
   }, [activeIndex]);
+
+  useEffect(() => {
+    updateOffset();
+  }, [updateOffset]);
+
+  // Re-measure on resize
+  useEffect(() => {
+    window.addEventListener("resize", updateOffset);
+    return () => window.removeEventListener("resize", updateOffset);
+  }, [updateOffset]);
 
   return (
     <div
@@ -112,12 +123,16 @@ function SyncedLyrics({
       className="h-full overflow-hidden relative"
       style={{
         maskImage:
-          "linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)",
+          "linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%)",
         WebkitMaskImage:
-          "linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)",
+          "linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%)",
       }}
     >
-      <div className="py-[40vh] px-8 space-y-6 text-center">
+      <motion.div
+        animate={{ y: offset }}
+        transition={{ type: "spring", stiffness: 80, damping: 20 }}
+        className="pt-[50%] pb-[50%] px-8 space-y-6 text-center"
+      >
         {lines.map((line, i) => {
           const isActive = i === activeIndex;
           const isPast = i < activeIndex;
@@ -126,7 +141,7 @@ function SyncedLyrics({
           return (
             <motion.div
               key={i}
-              ref={isActive ? activeRef : undefined}
+              ref={(el) => { lineRefs.current[i] = el; }}
               animate={{
                 opacity: isActive ? 1 : isPast ? 0.25 : 0.4,
                 scale: isActive ? 1 : 0.92,
@@ -155,7 +170,7 @@ function SyncedLyrics({
             </motion.div>
           );
         })}
-      </div>
+      </motion.div>
     </div>
   );
 }
@@ -171,18 +186,17 @@ function PlainLyrics({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
+  const [offset, setOffset] = useState(0);
 
-  // Estimated scroll position based on playback progress
   useEffect(() => {
     if (!containerRef.current || !innerRef.current || duration <= 0) return;
     const progress = currentTime / duration;
-    const scrollMax = innerRef.current.scrollHeight - containerRef.current.clientHeight;
-    if (scrollMax <= 0) return;
+    const containerHeight = containerRef.current.clientHeight;
+    const contentHeight = innerRef.current.scrollHeight;
+    const maxOffset = contentHeight - containerHeight;
+    if (maxOffset <= 0) return;
 
-    containerRef.current.scrollTo({
-      top: progress * scrollMax,
-      behavior: "smooth",
-    });
+    setOffset(-(progress * maxOffset));
   }, [currentTime, duration]);
 
   const paragraphs = text.split("\n");
@@ -193,18 +207,23 @@ function PlainLyrics({
       className="h-full overflow-hidden relative"
       style={{
         maskImage:
-          "linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)",
+          "linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%)",
         WebkitMaskImage:
-          "linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)",
+          "linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%)",
       }}
     >
-      <div ref={innerRef} className="py-[30vh] px-8 text-center space-y-4">
+      <motion.div
+        ref={innerRef}
+        animate={{ y: offset }}
+        transition={{ type: "spring", stiffness: 80, damping: 20 }}
+        className="pt-[40%] pb-[40%] px-8 text-center space-y-4"
+      >
         {paragraphs.map((line, i) => (
           <p key={i} className="text-2xl text-white/60 font-light leading-relaxed">
             {line || "\u00A0"}
           </p>
         ))}
-      </div>
+      </motion.div>
     </div>
   );
 }
