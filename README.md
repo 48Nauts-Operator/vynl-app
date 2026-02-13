@@ -10,7 +10,8 @@
 
 <p align="center">
   <a href="#features">Features</a> &bull;
-  <a href="#quick-start">Quick Start</a> &bull;
+  <a href="#quick-start-docker">Docker</a> &bull;
+  <a href="#quick-start-native--development">Native</a> &bull;
   <a href="#architecture">Architecture</a> &bull;
   <a href="#configuration">Configuration</a> &bull;
   <a href="#roadmap">Roadmap</a> &bull;
@@ -110,50 +111,7 @@ Vynl is a self-hosted music platform that combines library management, AI-powere
 - **Path Remapping** - Handle mount point changes without re-importing
 - **API Key Management** - Anthropic, Spotify, Replicate, YouTube
 
-## Quick Start
-
-```bash
-# Clone
-git clone https://github.com/48Nauts-Operator/vynl-app.git
-cd vynl-app
-
-# Install
-npm install
-
-# Configure
-cp .env.example .env.local
-# Edit .env.local with your paths and API keys
-
-# Run
-npm run dev
-```
-
-Open [http://localhost:3101](http://localhost:3101)
-
-### Environment Variables
-
-| Variable | Description | Example |
-|---|---|---|
-| `MUSIC_LIBRARY_PATH` | Path to organized music library | `/Volumes/Music/library` |
-| `BEETS_DB_PATH` | Path to beets SQLite database | `/Volumes/Music/library.db` |
-| `BEETS_PATH_REMAP` | Remap old paths in DB | `/Volumes/Music-1::/Volumes/Music` |
-| `VYNL_HOST` | Host URL for Sonos callback | `http://192.168.74.179:3101` |
-| `NEXT_PUBLIC_VYNL_HOST` | Client-side host URL | `http://192.168.74.179:3101` |
-| `PODCAST_STORAGE_PATH` | Where to store podcast episodes | `/Volumes/Music/podcasts` |
-| `ANTHROPIC_API_KEY` | For AI discovery & recommendations | `sk-ant-...` |
-| `SPOTIFY_CLIENT_ID` | Spotify integration | |
-| `SPOTIFY_CLIENT_SECRET` | Spotify integration | |
-| `SPOTIFY_REDIRECT_URI` | Spotify OAuth callback | `http://127.0.0.1:3101/api/spotify/callback` |
-
-### Prerequisites
-
-- **Node.js** 18+
-- **Beets** (`pip install beets`) for auto-tagging
-- **FFmpeg** for audio transcoding
-- Optional: **Whisper** for podcast transcription
-- Optional: **Fabric** for AI podcast analysis
-
-### Docker
+## Quick Start (Docker)
 
 Pre-built images are available on GitHub Container Registry for **amd64** and **arm64**:
 
@@ -161,22 +119,19 @@ Pre-built images are available on GitHub Container Registry for **amd64** and **
 docker pull ghcr.io/48nauts-operator/vynl-app:latest
 ```
 
-#### Quick Start with Docker Compose
+### Docker Compose
 
 ```bash
-# Clone the repo (for docker-compose.yml and .env.example)
 git clone https://github.com/48Nauts-Operator/vynl-app.git
 cd vynl-app
-
-# Configure
 cp .env.example .env
 # Edit .env with your LAN IP and music path
-
-# Start (pulls the pre-built image)
 docker compose up -d
 ```
 
-#### Portainer / Stack Deployment
+Open `http://<YOUR_IP>:3101`
+
+### Portainer / Stack Deployment
 
 Use the image `ghcr.io/48nauts-operator/vynl-app:latest` and configure these environment variables:
 
@@ -198,25 +153,60 @@ Mount these volumes:
 | `/app/data` | Persistent app data (named volume) |
 | `/app/public/covers` | Cover art cache (named volume) |
 
-#### Build Locally
+### Build Locally
 
 To build the image yourself instead of pulling:
 
 ```bash
 cp .env.example .env
-# Edit .env, then:
+# In docker-compose.yml, comment out 'image:' and uncomment 'build: .'
 docker compose up -d --build
 ```
 
-> In `docker-compose.yml`, comment out `image:` and uncomment `build: .` to use local builds.
-
-#### Notes
+### Docker Notes
 
 - The Docker image (~200MB) includes Beets and FFmpeg
 - For Sonos on the same network, you may need host networking — uncomment `network_mode: host` in `docker-compose.yml`
 - Images are automatically rebuilt and published on every push to `main`
+- Whisper and Fabric AI for podcast transcription/analysis are not yet available in Docker — planned for a future release
 
-> **Note:** Whisper and Fabric AI for podcast transcription/analysis are not yet available in Docker. These features require a native install for now and are planned for a future Docker release.
+---
+
+## Quick Start (Native / Development)
+
+```bash
+git clone https://github.com/48Nauts-Operator/vynl-app.git
+cd vynl-app
+npm install
+cp .env.example .env.local
+# Edit .env.local with your paths and API keys
+npm run dev
+```
+
+Open [http://localhost:3101](http://localhost:3101)
+
+### Prerequisites
+
+- **Node.js** 18+
+- **Beets** (`pip install beets`) for auto-tagging
+- **FFmpeg** for audio transcoding
+- Optional: **Whisper** for podcast transcription
+- Optional: **Fabric** for AI podcast analysis
+
+### Environment Variables
+
+| Variable | Description | Example |
+|---|---|---|
+| `MUSIC_LIBRARY_PATH` | Path to organized music library | `/Volumes/Music/library` |
+| `BEETS_DB_PATH` | Path to beets SQLite database | `/Volumes/Music/library.db` |
+| `BEETS_PATH_REMAP` | Remap old paths in DB | `/Volumes/Music-1::/Volumes/Music` |
+| `VYNL_HOST` | Host URL for Sonos callback | `http://192.168.1.100:3101` |
+| `NEXT_PUBLIC_VYNL_HOST` | Client-side host URL | `http://192.168.1.100:3101` |
+| `PODCAST_STORAGE_PATH` | Where to store podcast episodes | `/Volumes/Music/podcasts` |
+| `ANTHROPIC_API_KEY` | For AI discovery & recommendations | `sk-ant-...` |
+| `SPOTIFY_CLIENT_ID` | Spotify integration | |
+| `SPOTIFY_CLIENT_SECRET` | Spotify integration | |
+| `SPOTIFY_REDIRECT_URI` | Spotify OAuth callback | `http://127.0.0.1:3101/api/spotify/callback` |
 
 ## Architecture
 
