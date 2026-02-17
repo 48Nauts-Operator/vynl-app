@@ -54,9 +54,14 @@ export function useAudioPlayer() {
         return;
       }
 
-      const audioUrl = currentTrack.filePath
-        ? `/api/audio${currentTrack.filePath}`
-        : currentTrack.streamUrl!;
+      let audioUrl: string;
+      if (currentTrack.filePath) {
+        // Transcode lossless formats to MP3 for browser compatibility (Safari doesn't support FLAC)
+        const needsTranscode = currentTrack.filePath.match(/\.(flac|wav|aiff|alac)$/i);
+        audioUrl = `/api/audio${currentTrack.filePath}${needsTranscode ? "?sonos=1" : ""}`;
+      } else {
+        audioUrl = currentTrack.streamUrl!;
+      }
       audio.src = audioUrl;
       audio.load();
       historyRecorded.current = false;
