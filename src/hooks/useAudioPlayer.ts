@@ -83,20 +83,33 @@ export function useAudioPlayer() {
           .split("/")
           .map((seg) => encodeURIComponent(seg))
           .join("/");
-        // Append ?sonos=1 to trigger server-side transcoding for lossless formats
-        const sonosParam = currentTrack.filePath.match(/\.(flac|wav|aiff|alac)$/i)
-          ? "?sonos=1"
-          : "";
-        sonosPlayUriSent.current = true;
-        fetch("/api/sonos/control", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            speaker: sonosSpeaker,
-            action: "play-uri",
-            uri: `${vynlHost}/api/audio${encodedPath}${sonosParam}`,
-          }),
-        }).catch(console.error);
+        const isLossless = /\.(flac|wav|aiff|alac)$/i.test(currentTrack.filePath);
+        const sonosParam = isLossless ? "?sonos=1" : "";
+
+        const sendToSonos = () => {
+          sonosPlayUriSent.current = true;
+          fetch("/api/sonos/control", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              speaker: sonosSpeaker,
+              action: "play-uri",
+              uri: `${vynlHost}/api/audio${encodedPath}${sonosParam}`,
+            }),
+          }).catch(console.error);
+        };
+
+        if (isLossless) {
+          // Pre-warm transcode cache before telling Sonos to play
+          fetch(`/api/audio${encodedPath}?sonos=1&warm=1`)
+            .then((res) => {
+              if (res.ok) sendToSonos();
+              else console.error("Transcode warm-up failed");
+            })
+            .catch(console.error);
+        } else {
+          sendToSonos();
+        }
       } else if (currentTrack.sourceId && currentTrack.source === "spotify") {
         // Spotify tracks are played directly by the caller (discover page, search, etc.)
         // — not by this hook, to avoid duplicate commands and 500 errors
@@ -203,9 +216,9 @@ export function useAudioPlayer() {
         }
 
         // Detect if Sonos stopped (track ended)
-        // Skip detection within 5s of a track change to avoid race with play-uri
+        // Skip detection within 15s of a track change to allow for FLAC transcoding + buffering
         const sinceTrackChange = Date.now() - trackChangedAt.current;
-        if (data.state === "STOPPED" && position === 0 && isPlaying && sinceTrackChange > 5000) {
+        if (data.state === "STOPPED" && position === 0 && isPlaying && sinceTrackChange > 15000) {
           playNext();
         }
       } catch {

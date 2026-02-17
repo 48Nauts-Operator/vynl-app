@@ -44,8 +44,9 @@ export async function GET(
   const quality = request.nextUrl.searchParams.get("quality");
   const download = request.nextUrl.searchParams.get("download");
   const sonosMode = request.nextUrl.searchParams.get("sonos") === "1";
+  const warmOnly = request.nextUrl.searchParams.get("warm") === "1";
 
-  // Sonos transcoding: FLAC/WAV/AIFF → MP3 320kbps via cached temp files
+  // Sonos/browser transcoding: FLAC/WAV/AIFF → MP3 320kbps via cached temp files
   // Transcodes once per file, then serves with proper Content-Length for Sonos UPnP
   if (sonosMode && [".flac", ".wav", ".aiff", ".alac"].includes(ext)) {
     const cacheDir = path.join(os.tmpdir(), "vynl-sonos-cache");
@@ -84,6 +85,13 @@ export async function GET(
         try { fs.unlinkSync(cachePath); } catch {}
         // Fall through to serve original FLAC
       }
+    }
+
+    // warm=1: just ensure cache is ready, return JSON (used to pre-warm before Sonos play)
+    if (warmOnly && fs.existsSync(cachePath)) {
+      return NextResponse.json({ ready: true });
+    } else if (warmOnly) {
+      return NextResponse.json({ ready: false, error: "transcode failed" }, { status: 500 });
     }
 
     // Serve cached MP3 if it exists
