@@ -21,6 +21,21 @@ export async function GET(
     }
   }
 
+  const sonosMode = request.nextUrl.searchParams.get("sonos") === "1";
+
+  // Sonos URLs use .mp3 extension so Sonos sets correct protocolInfo (audio/mpeg).
+  // Resolve back to the original lossless file for transcoding.
+  if (sonosMode && !fs.existsSync(filePath) && filePath.endsWith(".mp3")) {
+    const losslessExts = [".flac", ".wav", ".aiff", ".alac"];
+    const basePath = filePath.slice(0, -4); // strip .mp3
+    for (const lext of losslessExts) {
+      if (fs.existsSync(basePath + lext)) {
+        filePath = basePath + lext;
+        break;
+      }
+    }
+  }
+
   if (!fs.existsSync(filePath)) {
     return NextResponse.json({ error: "File not found" }, { status: 404 });
   }
@@ -43,7 +58,6 @@ export async function GET(
 
   const quality = request.nextUrl.searchParams.get("quality");
   const download = request.nextUrl.searchParams.get("download");
-  const sonosMode = request.nextUrl.searchParams.get("sonos") === "1";
   const warmOnly = request.nextUrl.searchParams.get("warm") === "1";
 
   // Sonos/browser transcoding: FLAC/WAV/AIFF → MP3 320kbps via cached temp files

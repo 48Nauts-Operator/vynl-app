@@ -84,6 +84,12 @@ export function useAudioPlayer() {
           .map((seg) => encodeURIComponent(seg))
           .join("/");
         const isLossless = /\.(flac|wav|aiff|alac)$/i.test(currentTrack.filePath);
+
+        // For lossless: swap extension to .mp3 so Sonos sets protocolInfo=audio/mpeg
+        // Server resolves .mp3 back to .flac and serves transcoded MP3
+        const sonosEncodedPath = isLossless
+          ? encodedPath.replace(/\.(flac|wav|aiff|alac)$/i, ".mp3")
+          : encodedPath;
         const sonosParam = isLossless ? "?sonos=1" : "";
 
         const sendToSonos = () => {
@@ -94,13 +100,13 @@ export function useAudioPlayer() {
             body: JSON.stringify({
               speaker: sonosSpeaker,
               action: "play-uri",
-              uri: `${vynlHost}/api/audio${encodedPath}${sonosParam}`,
+              uri: `${vynlHost}/api/audio${sonosEncodedPath}${sonosParam}`,
             }),
           }).catch(console.error);
         };
 
         if (isLossless) {
-          // Pre-warm transcode cache before telling Sonos to play
+          // Pre-warm transcode cache using original path before telling Sonos to play
           fetch(`/api/audio${encodedPath}?sonos=1&warm=1`)
             .then((res) => {
               if (res.ok) sendToSonos();
