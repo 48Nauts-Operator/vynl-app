@@ -4,6 +4,7 @@ import { tracks, albumRules } from "@/lib/db/schema";
 import { FilesystemAdapter } from "@/lib/adapters/filesystem-adapter";
 import { BeetsAdapter } from "@/lib/adapters/beets-adapter";
 import { MusicSourceAdapter } from "@/lib/adapters/types";
+import { reconcileWishlist } from "@/lib/wishlist-reconciler";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
@@ -165,7 +166,16 @@ export async function POST(request: NextRequest) {
       console.error("Compilation detection error:", err);
     }
 
-    return NextResponse.json({ adapter: adapter.name, scanned, added, errors, compilationsFixed });
+    // Post-scan: reconcile wishlist
+    let wishlistReconciled = 0;
+    try {
+      const reconcileResult = reconcileWishlist();
+      wishlistReconciled = reconcileResult.matched;
+    } catch (err) {
+      console.error("Wishlist reconciliation error:", err);
+    }
+
+    return NextResponse.json({ adapter: adapter.name, scanned, added, errors, compilationsFixed, wishlistReconciled });
   } catch (err) {
     console.error("Scan error:", err);
     return NextResponse.json(

@@ -45,6 +45,11 @@ import {
   Ban,
   ChevronDown,
   BrainCircuit,
+  Package,
+  Plug,
+  Code,
+  Eye,
+  FolderSearch,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatFileSize } from "@/lib/utils";
@@ -85,6 +90,12 @@ interface DuplicateFormat {
 }
 
 export default function SettingsPage() {
+  // Zustand persist rehydrates from localStorage synchronously on the client,
+  // which can differ from the server's defaults → hydration mismatch.
+  // Guard store-derived rendering behind this flag.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+
   const [musicPath, setMusicPath] = useState("");
   const [vynlHost, setVynlHost] = useState("http://localhost:3000");
   const [anthropicKey, setAnthropicKey] = useState("");
@@ -157,6 +168,147 @@ export default function SettingsPage() {
   } | null>(null);
   const [trackAnalysisRunning, setTrackAnalysisRunning] = useState(false);
 
+  // Metadata enrichment state
+  const [enrichJob, setEnrichJob] = useState<{
+    status: string; phase: string; phaseDetail: string;
+    totalTracks: number; processedTracks: number;
+    embeddedFound: number; mbQueried: number; mbFound: number;
+    gapsRemaining: number; errors: number;
+  } | null>(null);
+  const [enrichGaps, setEnrichGaps] = useState<{ missingYear: number; missingGenre: number; totalTracks: number } | null>(null);
+  const [enrichRunning, setEnrichRunning] = useState(false);
+
+  // File Watcher state
+  const [watcherRunning, setWatcherRunning] = useState(false);
+  const [watcherConfig, setWatcherConfig] = useState<{
+    watchPaths: string[];
+    debounceSeconds: number;
+    autoDeleteOnSuccess: boolean;
+  }>({ watchPaths: [], debounceSeconds: 10, autoDeleteOnSuccess: true });
+  const [watcherStatus, setWatcherStatus] = useState<{
+    queueLength: number;
+    processing: boolean;
+    processedCount: number;
+    lastActivity: number | null;
+    recentProcessed: Array<{ folderPath: string; status: string; importedTracks: number; processedAt: number }>;
+    eventLog: Array<{ timestamp: number; level: string; message: string }>;
+  } | null>(null);
+  const [watcherSaved, setWatcherSaved] = useState(false);
+  const [newWatchPath, setNewWatchPath] = useState("");
+
+  // Lidarr state
+  const [lidarrUrl, setLidarrUrl] = useState("");
+  const [lidarrApiKey, setLidarrApiKey] = useState("");
+  const [lidarrTesting, setLidarrTesting] = useState(false);
+  const [lidarrSaved, setLidarrSaved] = useState(false);
+  const [lidarrResult, setLidarrResult] = useState<{
+    ok: boolean;
+    version?: string;
+    artistCount?: number;
+    rootFolder?: { path: string; freeSpace: number; totalSpace: number };
+    qualityProfiles?: Array<{ id: number; name: string }>;
+    metadataProfiles?: Array<{ id: number; name: string }>;
+    error?: string;
+  } | null>(null);
+  const [lidarrConfigured, setLidarrConfigured] = useState(false);
+
+  const loadLidarrConfig = async () => {
+    try {
+      const res = await fetch("/api/lidarr/config");
+      const data = await res.json();
+      if (data.configured) {
+        setLidarrUrl(data.url);
+        setLidarrApiKey(data.apiKey);
+        setLidarrConfigured(true);
+      }
+    } catch {}
+  };
+
+  // The config GET endpoint masks the API key with ● (U+25CF).
+  // Sending masked keys in HTTP headers causes a ByteString error.
+  // Omit the key when masked — the backend falls back to the saved real key.
+  const isMaskedKey = (key: string) => key.includes("\u25CF");
+
+  const saveLidarrSettings = async () => {
+    if (!lidarrUrl || !lidarrApiKey) return;
+    if (isMaskedKey(lidarrApiKey)) return; // nothing new to save
+    try {
+      await fetch("/api/lidarr/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: lidarrUrl, apiKey: lidarrApiKey }),
+      });
+      setLidarrSaved(true);
+      setLidarrConfigured(true);
+      setTimeout(() => setLidarrSaved(false), 2000);
+    } catch {}
+  };
+
+  const testLidarrConnection = async () => {
+    setLidarrTesting(true);
+    setLidarrResult(null);
+    try {
+      const body: Record<string, string> = { url: lidarrUrl };
+      if (!isMaskedKey(lidarrApiKey)) body.apiKey = lidarrApiKey;
+      const res = await fetch("/api/lidarr/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      setLidarrResult(data);
+      if (data.ok) {
+        setLidarrConfigured(true);
+      }
+    } catch {
+      setLidarrResult({ ok: false, error: "Request failed" });
+    }
+    setLidarrTesting(false);
+  };
+
+  const loadWatcherStatus = async () => {
+    try {
+      const res = await fetch("/api/library/watcher");
+      const data = await res.json();
+      setWatcherRunning(data.running);
+      setWatcherStatus({
+        queueLength: data.queueLength,
+        processing: data.processing || false,
+        processedCount: data.processedCount,
+        lastActivity: data.lastActivity,
+        recentProcessed: data.recentProcessed || [],
+        eventLog: data.eventLog || [],
+      });
+      if (data.dbConfig) {
+        setWatcherConfig(data.dbConfig);
+      }
+    } catch {}
+  };
+
+  const saveWatcherConfig = async () => {
+    try {
+      await fetch("/api/library/watcher", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(watcherConfig),
+      });
+      setWatcherSaved(true);
+      setTimeout(() => setWatcherSaved(false), 2000);
+    } catch {}
+  };
+
+  const toggleWatcher = async () => {
+    if (watcherRunning) {
+      await fetch("/api/library/watcher", { method: "DELETE" });
+      setWatcherRunning(false);
+    } else {
+      const res = await fetch("/api/library/watcher", { method: "POST" });
+      const data = await res.json();
+      if (data.success) setWatcherRunning(true);
+    }
+    loadWatcherStatus();
+  };
+
   const loadTrackAnalysisStatus = async () => {
     try {
       const res = await fetch("/api/library/analyze-tracks");
@@ -181,6 +333,31 @@ export default function SettingsPage() {
     } catch {}
   };
 
+  const loadEnrichStatus = async () => {
+    try {
+      const res = await fetch("/api/library/housekeeping/metadata-enrich");
+      const data = await res.json();
+      setEnrichGaps(data.gaps || null);
+      if (data.job) {
+        setEnrichJob(data.job);
+        if (data.job.status === "running") setEnrichRunning(true);
+      }
+    } catch {}
+  };
+
+  const startEnrich = async () => {
+    setEnrichRunning(true);
+    try {
+      await fetch("/api/library/housekeeping/metadata-enrich", { method: "POST" });
+    } catch {}
+  };
+
+  const cancelEnrich = async () => {
+    try {
+      await fetch("/api/library/housekeeping/metadata-enrich", { method: "DELETE" });
+    } catch {}
+  };
+
   useEffect(() => {
     setMusicPath(process.env.NEXT_PUBLIC_MUSIC_PATH || "");
     setVynlHost(process.env.NEXT_PUBLIC_VYNL_HOST || "http://localhost:3000");
@@ -190,6 +367,9 @@ export default function SettingsPage() {
     loadDuplicateFormats();
     loadLyricsStats();
     loadTrackAnalysisStatus();
+    loadEnrichStatus();
+    loadLidarrConfig();
+    loadWatcherStatus();
   }, []);
 
   const loadRules = async () => {
@@ -437,6 +617,30 @@ export default function SettingsPage() {
     return () => clearInterval(interval);
   }, [trackAnalysisRunning]);
 
+  // Poll metadata enrichment job
+  useEffect(() => {
+    if (!enrichRunning) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch("/api/library/housekeeping/metadata-enrich");
+        const data = await res.json();
+        if (data.job) setEnrichJob(data.job);
+        if (data.gaps) setEnrichGaps(data.gaps);
+        if (data.job?.status === "complete" || data.job?.status === "cancelled" || data.job?.status === "error") {
+          setEnrichRunning(false);
+        }
+      } catch {}
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [enrichRunning]);
+
+  // Poll file watcher status (faster when processing, keep polling briefly after stop)
+  useEffect(() => {
+    if (!watcherRunning && !watcherStatus?.processing) return;
+    const interval = setInterval(loadWatcherStatus, watcherStatus?.processing ? 2000 : 5000);
+    return () => clearInterval(interval);
+  }, [watcherRunning, watcherStatus?.processing]);
+
   // Check if an AI analysis job is already running on mount
   useEffect(() => {
     fetch("/api/library/housekeeping/album-analyze").then((r) => r.json()).then((data) => {
@@ -564,6 +768,21 @@ export default function SettingsPage() {
         <p className="text-muted-foreground mt-1">
           Configure your Vynl instance
         </p>
+      </div>
+
+      {/* Developer Mode Toggle */}
+      <div className="flex items-center justify-between py-2 px-1">
+        <div className="flex items-center gap-3">
+          <Code className="h-4 w-4 text-muted-foreground" />
+          <div>
+            <p className="text-sm font-medium">Developer Mode</p>
+            <p className="text-xs text-muted-foreground">Show advanced integrations</p>
+          </div>
+        </div>
+        <Switch
+          checked={hydrated && features.developerMode}
+          onCheckedChange={() => toggleFeature("developerMode")}
+        />
       </div>
 
       {/* Feature Toggles */}
@@ -1234,6 +1453,114 @@ export default function SettingsPage() {
               </Button>
             </div>
           </div>
+
+          <Separator />
+
+          {/* Metadata Enrichment Section */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Metadata Enrichment</p>
+                <p className="text-xs text-muted-foreground">
+                  Fill missing year and genre from embedded file metadata and MusicBrainz
+                </p>
+              </div>
+              <div className="flex gap-1.5">
+                {enrichGaps && enrichGaps.missingYear > 0 && (
+                  <Badge variant="secondary" className="text-xs">
+                    {enrichGaps.missingYear} missing year
+                  </Badge>
+                )}
+                {enrichGaps && enrichGaps.missingGenre > 0 && (
+                  <Badge variant="secondary" className="text-xs">
+                    {enrichGaps.missingGenre} missing genre
+                  </Badge>
+                )}
+                {enrichGaps && enrichGaps.missingYear === 0 && enrichGaps.missingGenre === 0 && (
+                  <Badge variant="outline" className="text-xs text-green-400 border-green-400/30">
+                    <CheckCircle className="h-3 w-3 mr-1" />
+                    Complete
+                  </Badge>
+                )}
+              </div>
+            </div>
+
+            {/* Progress bar while running */}
+            {enrichJob && enrichRunning && (
+              <div className="space-y-2 p-3 rounded-lg border border-border bg-secondary/10">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                    <span className="text-sm">
+                      {enrichJob.phase === "embedded" ? "Reading audio files..." : "Querying MusicBrainz..."}
+                    </span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {enrichJob.phase === "embedded"
+                      ? `${enrichJob.processedTracks}/${enrichJob.totalTracks}`
+                      : `${enrichJob.mbQueried}/${enrichJob.totalTracks - enrichJob.processedTracks + (enrichJob.totalTracks - enrichJob.embeddedFound)}`}
+                  </span>
+                </div>
+                {enrichJob.totalTracks > 0 && (
+                  <Progress
+                    value={Math.round((enrichJob.processedTracks / enrichJob.totalTracks) * 100)}
+                    className="h-1.5"
+                  />
+                )}
+                <p className="text-xs text-muted-foreground truncate">
+                  {enrichJob.phaseDetail}
+                </p>
+                <div className="flex gap-3 text-xs">
+                  <span className="text-green-400">{enrichJob.embeddedFound} from files</span>
+                  {enrichJob.phase === "musicbrainz" && (
+                    <span className="text-blue-400">{enrichJob.mbFound} from MusicBrainz</span>
+                  )}
+                  {enrichJob.errors > 0 && (
+                    <span className="text-red-400">{enrichJob.errors} errors</span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Completed summary */}
+            {enrichJob && !enrichRunning && enrichJob.status !== "idle" && enrichJob.status !== "running" && (
+              <div className="p-3 rounded-lg border border-green-500/20 bg-green-500/5">
+                <div className="flex items-center gap-2 text-sm">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  <span>
+                    {enrichJob.status === "complete" ? "Enrichment complete" : `Enrichment ${enrichJob.status}`}:
+                    {" "}{enrichJob.embeddedFound} from files, {enrichJob.mbFound} from MusicBrainz
+                    {enrichJob.gapsRemaining > 0 && `, ${enrichJob.gapsRemaining} still missing`}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              {!enrichRunning ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={startEnrich}
+                  disabled={enrichGaps != null && enrichGaps.missingYear === 0 && enrichGaps.missingGenre === 0}
+                >
+                  <Database className="h-4 w-4 mr-2" />
+                  {enrichGaps && enrichGaps.missingYear === 0 && enrichGaps.missingGenre === 0
+                    ? "All metadata complete"
+                    : `Enrich Metadata (${(enrichGaps?.missingYear || 0) + (enrichGaps?.missingGenre || 0)} gaps)`}
+                </Button>
+              ) : (
+                <Button variant="outline" size="sm" onClick={cancelEnrich}>
+                  <Ban className="h-4 w-4 mr-2" />
+                  Cancel
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" onClick={loadEnrichStatus}>
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Refresh
+              </Button>
+            </div>
+          </div>
         </CardContent>
         )}
       </Card>
@@ -1435,6 +1762,331 @@ export default function SettingsPage() {
         </CardContent>
         )}
       </Card>
+
+      {/* Lidarr Integration */}
+      {hydrated && features.developerMode && <Card>
+        <CardHeader className="cursor-pointer select-none" onClick={() => toggle("lidarr")}>
+          <CardTitle className="flex items-center gap-2">
+            <Package className="h-5 w-5" />
+            Lidarr
+            {lidarrConfigured && !isOpen("lidarr") && (
+              <Badge variant="outline" className="text-xs text-green-400 border-green-400/30">Connected</Badge>
+            )}
+            <ChevronDown className={`h-4 w-4 ml-auto transition-transform ${isOpen("lidarr") ? "" : "-rotate-90"}`} />
+          </CardTitle>
+        </CardHeader>
+        {isOpen("lidarr") && (
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Connect to Lidarr to automatically download wishlist albums.
+            </p>
+
+            <div className="space-y-2">
+              <Label>Lidarr URL</Label>
+              <Input
+                value={lidarrUrl}
+                onChange={(e) => setLidarrUrl(e.target.value)}
+                placeholder="http://localhost:8686"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>API Key</Label>
+              <Input
+                type="password"
+                value={lidarrApiKey}
+                onChange={(e) => setLidarrApiKey(e.target.value)}
+                placeholder="Your Lidarr API key"
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={saveLidarrSettings}
+                disabled={!lidarrUrl || !lidarrApiKey}
+              >
+                {lidarrSaved ? (
+                  <>
+                    <CheckCircle className="h-4 w-4 mr-2 text-green-400" />
+                    Saved
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4 mr-2" />
+                    Save
+                  </>
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={testLidarrConnection}
+                disabled={lidarrTesting || !lidarrUrl || !lidarrApiKey}
+              >
+                {lidarrTesting ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Plug className="h-4 w-4 mr-2" />
+                )}
+                {lidarrTesting ? "Testing..." : "Test Connection"}
+              </Button>
+            </div>
+
+            {/* Test result */}
+            {lidarrResult && (
+              <div
+                className={`p-3 rounded-lg border space-y-1.5 ${
+                  lidarrResult.ok
+                    ? "border-green-500/20 bg-green-500/5"
+                    : "border-red-500/20 bg-red-500/5"
+                }`}
+              >
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  {lidarrResult.ok ? (
+                    <>
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      <span className="text-green-400">Connected</span>
+                    </>
+                  ) : (
+                    <>
+                      <X className="h-4 w-4 text-red-500" />
+                      <span className="text-red-400">Connection Failed</span>
+                    </>
+                  )}
+                </div>
+                {lidarrResult.ok ? (
+                  <div className="space-y-1 text-xs text-muted-foreground ml-6">
+                    {lidarrResult.version && (
+                      <p>Lidarr v{lidarrResult.version}</p>
+                    )}
+                    <p>{lidarrResult.artistCount} artist{lidarrResult.artistCount !== 1 ? "s" : ""} monitored</p>
+                    {lidarrResult.rootFolder && (
+                      <>
+                        <p>Root: {lidarrResult.rootFolder.path}</p>
+                        <p>
+                          {(lidarrResult.rootFolder.freeSpace / 1e12).toFixed(1)} TB free
+                          {lidarrResult.rootFolder.totalSpace > 0 &&
+                            ` of ${(lidarrResult.rootFolder.totalSpace / 1e12).toFixed(1)} TB`}
+                        </p>
+                      </>
+                    )}
+                    {lidarrResult.qualityProfiles && lidarrResult.qualityProfiles.length > 0 && (
+                      <p>Quality: {lidarrResult.qualityProfiles.map((p) => p.name).join(", ")}</p>
+                    )}
+                    {lidarrResult.metadataProfiles && lidarrResult.metadataProfiles.length > 0 && (
+                      <p>Metadata: {lidarrResult.metadataProfiles.map((p) => p.name).join(", ")}</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-red-400 ml-6">{lidarrResult.error}</p>
+                )}
+              </div>
+            )}
+
+            <p className="text-xs text-muted-foreground">
+              Config saved server-side in vynl.db
+            </p>
+          </CardContent>
+        )}
+      </Card>}
+
+      {/* File Watcher */}
+      {hydrated && features.developerMode && <Card>
+        <CardHeader className="cursor-pointer select-none" onClick={() => toggle("watcher")}>
+          <CardTitle className="flex items-center gap-2">
+            <FolderSearch className="h-5 w-5" />
+            File Watcher
+            {watcherRunning && !isOpen("watcher") && (
+              <Badge variant="outline" className="text-xs text-green-400 border-green-400/30">
+                <Eye className="h-3 w-3 mr-1" />
+                Running
+              </Badge>
+            )}
+            <ChevronDown className={`h-4 w-4 ml-auto transition-transform ${isOpen("watcher") ? "" : "-rotate-90"}`} />
+          </CardTitle>
+        </CardHeader>
+        {isOpen("watcher") && (
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Watch download directories for new music. Automatically imports via beets,
+              rescans library, reconciles wishlist, and optionally deletes source folders.
+            </p>
+
+            {/* Enable/Disable toggle + Stop button */}
+            <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/10 border border-border">
+              <div>
+                <p className="text-sm font-medium">Watcher Active</p>
+                <p className="text-xs text-muted-foreground">
+                  {watcherStatus?.processing
+                    ? `Processing — ${watcherStatus.queueLength} in queue`
+                    : watcherRunning
+                      ? "Monitoring for new downloads"
+                      : "Watcher is stopped"}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {(watcherRunning || watcherStatus?.processing) && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={toggleWatcher}
+                  >
+                    Stop
+                  </Button>
+                )}
+                <Switch
+                  checked={watcherRunning}
+                  onCheckedChange={toggleWatcher}
+                  disabled={watcherConfig.watchPaths.length === 0}
+                />
+              </div>
+            </div>
+
+            {/* Watch Paths */}
+            <div className="space-y-2">
+              <Label>Watch Paths</Label>
+              {watcherConfig.watchPaths.length > 0 && (
+                <div className="space-y-1">
+                  {watcherConfig.watchPaths.map((p, i) => (
+                    <div key={i} className="flex items-center gap-2 p-2 rounded bg-secondary/20 text-sm font-mono">
+                      <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className="flex-1 truncate">{p}</span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0"
+                        onClick={() => {
+                          setWatcherConfig((prev) => ({
+                            ...prev,
+                            watchPaths: prev.watchPaths.filter((_, j) => j !== i),
+                          }));
+                        }}
+                      >
+                        <Trash2 className="h-3 w-3 text-destructive" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <Input
+                  value={newWatchPath}
+                  onChange={(e) => setNewWatchPath(e.target.value)}
+                  placeholder="/Volumes/Downloads/completed/music"
+                  className="font-mono text-sm"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!newWatchPath.trim()}
+                  onClick={() => {
+                    if (newWatchPath.trim()) {
+                      setWatcherConfig((prev) => ({
+                        ...prev,
+                        watchPaths: [...prev.watchPaths, newWatchPath.trim()],
+                      }));
+                      setNewWatchPath("");
+                    }
+                  }}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Settings */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label className="text-xs">Debounce (seconds)</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={120}
+                  value={watcherConfig.debounceSeconds}
+                  onChange={(e) =>
+                    setWatcherConfig((prev) => ({
+                      ...prev,
+                      debounceSeconds: parseInt(e.target.value) || 10,
+                    }))
+                  }
+                />
+              </div>
+              <div className="flex items-center gap-2 pt-4">
+                <Switch
+                  checked={watcherConfig.autoDeleteOnSuccess}
+                  onCheckedChange={(v) =>
+                    setWatcherConfig((prev) => ({
+                      ...prev,
+                      autoDeleteOnSuccess: v,
+                    }))
+                  }
+                />
+                <Label className="text-xs">Auto-delete source on success</Label>
+              </div>
+            </div>
+
+            <Button variant="outline" onClick={saveWatcherConfig}>
+              {watcherSaved ? (
+                <>
+                  <CheckCircle className="h-4 w-4 mr-2 text-green-400" />
+                  Saved
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  Save Config
+                </>
+              )}
+            </Button>
+
+            {/* Activity Log */}
+            {watcherStatus && (watcherRunning || watcherStatus.eventLog.length > 0) && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    {watcherRunning ? (
+                      <Eye className="h-3.5 w-3.5 text-green-400" />
+                    ) : (
+                      <Eye className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                    <span className="text-sm font-medium">
+                      {watcherStatus.processing ? "Processing..." : watcherRunning ? "Watching" : "Stopped"}
+                    </span>
+                  </div>
+                  <div className="flex gap-3 text-xs text-muted-foreground">
+                    {watcherStatus.queueLength > 0 && (
+                      <span>Queue: {watcherStatus.queueLength}</span>
+                    )}
+                    <span>Processed: {watcherStatus.processedCount}</span>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border bg-black/30 p-2 max-h-48 overflow-y-auto font-mono text-xs space-y-0.5">
+                  {watcherStatus.eventLog.length === 0 ? (
+                    <p className="text-muted-foreground py-2 text-center">No events yet</p>
+                  ) : (
+                    watcherStatus.eventLog.slice().reverse().map((event, i) => (
+                      <div key={i} className="flex gap-2 leading-relaxed">
+                        <span className="text-muted-foreground/50 shrink-0">
+                          {new Date(event.timestamp).toLocaleTimeString()}
+                        </span>
+                        <span className={
+                          event.level === "success" ? "text-green-400" :
+                          event.level === "error" ? "text-red-400" :
+                          event.level === "warn" ? "text-yellow-400" :
+                          "text-muted-foreground"
+                        }>
+                          {event.message}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        )}
+      </Card>}
 
       <Card>
         <CardHeader className="cursor-pointer select-none" onClick={() => toggle("database")}>

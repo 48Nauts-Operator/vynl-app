@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useState, useMemo, useRef } from "react";
+import React, { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,9 @@ import {
   Filter,
   Copy,
   ChevronDownIcon,
+  Trash2,
+  Package,
+  Ban,
 } from "lucide-react";
 import Image from "next/image";
 import { motion } from "framer-motion";
@@ -34,27 +38,52 @@ interface WishListItem {
   isrc: string | null;
   coverUrl: string | null;
   spotifyPlaylistNames: string | null;
+  popularity: number | null;
   status: string;
   createdAt: string;
 }
 
-type SortField = "title" | "artist" | "album" | "status" | "playlists";
+// Enriched item with pre-parsed playlist names
+interface EnrichedItem extends WishListItem {
+  _plNames: string[];
+  _searchKey: string; // pre-lowercased search target
+}
+
+type SortField = "title" | "artist" | "album" | "status" | "playlists" | "popularity";
 type SortDir = "asc" | "desc";
 type StatusFilter = "all" | "pending" | "downloading" | "completed" | "dismissed";
 
+function parsePlaylistNames(json: string | null): string[] {
+  if (!json) return [];
+  try { return JSON.parse(json); } catch { return []; }
+}
+
+/** Debounce hook */
+function useDebounce<T>(value: T, ms: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), ms);
+    return () => clearTimeout(timer);
+  }, [value, ms]);
+  return debounced;
+}
+
+const ROW_HEIGHT = 44;
+
 export default function WishlistPage() {
-  const [items, setItems] = useState<WishListItem[]>([]);
+  const [rawItems, setRawItems] = useState<WishListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 300);
   const [sortField, setSortField] = useState<SortField>("artist");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [downloadingIds, setDownloadingIds] = useState<Set<number>>(new Set());
   const [tab, setTab] = useState<"spotify">("spotify");
   const [duplicatesOnly, setDuplicatesOnly] = useState(false);
   const [playlistFilter, setPlaylistFilter] = useState<string>("all");
   const [playlistDropdownOpen, setPlaylistDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const tableContainerRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -71,16 +100,26 @@ export default function WishlistPage() {
   const fetchItems = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/wishlist?limit=10000");
+      const res = await fetch("/api/wishlist?limit=50000");
       const data = await res.json();
-      setItems(data.items || []);
+      setRawItems(data.items || []);
     } catch {}
     setLoading(false);
   };
 
-  useEffect(() => {
-    fetchItems();
-  }, []);
+  useEffect(() => { fetchItems(); }, []);
+
+  // Pre-enrich items once: parse playlist names + build search key
+  const items = useMemo<EnrichedItem[]>(() =>
+    rawItems.map((i) => {
+      const _plNames = parsePlaylistNames(i.spotifyPlaylistNames);
+      return {
+        ...i,
+        _plNames,
+        _searchKey: `${(i.seedTitle || "").toLowerCase()}\t${(i.seedArtist || "").toLowerCase()}\t${(i.seedAlbum || "").toLowerCase()}\t${_plNames.join(" ").toLowerCase()}`,
+      };
+    }),
+  [rawItems]);
 
   const dismissItem = async (id: number) => {
     await fetch("/api/wishlist", {
@@ -88,20 +127,16 @@ export default function WishlistPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, status: "dismissed" }),
     });
-    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, status: "dismissed" } : i)));
+    setRawItems((prev) => prev.map((i) => (i.id === id ? { ...i, status: "dismissed" } : i)));
   };
 
-  const downloadItem = async (id: number) => {
-    setDownloadingIds((prev) => new Set(prev).add(id));
-    try {
-      await fetch("/api/spotify/download", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: [id] }),
-      });
-    } catch {}
-    // Poll status
-    setTimeout(fetchItems, 5000);
+  const deleteItem = async (id: number) => {
+    await fetch("/api/wishlist", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [id] }),
+    });
+    setRawItems((prev) => prev.filter((i) => i.id !== id));
   };
 
   const [dupeProgress, setDupeProgress] = useState<{
@@ -112,74 +147,187 @@ export default function WishlistPage() {
     error?: string;
   } | null>(null);
 
-  const parsePlaylistNames = (json: string | null): string[] => {
-    if (!json) return [];
+  // Lidarr push state
+  const [lidarrPush, setLidarrPush] = useState<{
+    status: string;
+    totalArtists: number;
+    processed: number;
+    added: number;
+    skipped: number;
+    errors: number;
+    updatedItems: number;
+    currentArtist?: string;
+    errorMessage?: string;
+  } | null>(null);
+  const [lidarrPushRunning, setLidarrPushRunning] = useState(false);
+  const [lidarrConfigured, setLidarrConfigured] = useState(false);
+
+  // Check Lidarr config + running push job on mount
+  useEffect(() => {
+    fetch("/api/lidarr/config").then((r) => r.json()).then((data) => {
+      if (data.configured) setLidarrConfigured(true);
+    }).catch(() => {});
+    fetch("/api/lidarr/push").then((r) => r.json()).then((data) => {
+      if (data.status === "running") {
+        setLidarrPush(data);
+        setLidarrPushRunning(true);
+      }
+    }).catch(() => {});
+  }, []);
+
+  const startLidarrPush = async () => {
+    setLidarrPushRunning(true);
+    setLidarrPush(null);
     try {
-      return JSON.parse(json);
+      const res = await fetch("/api/lidarr/push", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setLidarrPush({ status: "error", totalArtists: 0, processed: 0, added: 0, skipped: 0, errors: 0, updatedItems: 0, errorMessage: data.error });
+        setLidarrPushRunning(false);
+      }
     } catch {
-      return [];
+      setLidarrPushRunning(false);
     }
   };
 
-  const dismissDuplicates = async () => {
+  const cancelLidarrPush = async () => {
+    try { await fetch("/api/lidarr/push", { method: "DELETE" }); } catch {}
+  };
+
+  // Poll Lidarr push job
+  useEffect(() => {
+    if (!lidarrPushRunning) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch("/api/lidarr/push");
+        const data = await res.json();
+        if (data.status === "idle") return;
+        setLidarrPush(data);
+        if (data.status === "complete" || data.status === "cancelled" || data.status === "error") {
+          setLidarrPushRunning(false);
+          fetchItems(); // Refresh to show updated statuses
+        }
+      } catch {}
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [lidarrPushRunning]);
+
+  // Extract all unique playlist names for the dropdown
+  const allPlaylistNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const i of items) {
+      if (i.type === "spotify_missing") {
+        for (const n of i._plNames) names.add(n);
+      }
+    }
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [items]);
+
+  // Build duplicate data
+  const dupeData = useMemo(() => {
+    const groups = new Map<string, EnrichedItem[]>();
+    for (const item of items) {
+      if (item.type !== "spotify_missing") continue;
+      const key = `${(item.seedArtist || "").trim().toLowerCase()}::${(item.seedTitle || "").trim().toLowerCase()}`;
+      let group = groups.get(key);
+      if (!group) { group = []; groups.set(key, group); }
+      group.push(item);
+    }
+    const dupeGroups = new Map<string, EnrichedItem[]>();
+    const dupeIdSet = new Set<number>();
+    let extraCount = 0;
+
+    for (const [key, group] of groups) {
+      if (group.length > 1) {
+        dupeGroups.set(key, group);
+        for (const item of group) dupeIdSet.add(item.id);
+        extraCount += group.length - 1;
+      }
+    }
+
+    return { dupeGroups, dupeIdSet, totalGroups: dupeGroups.size, extraCount };
+  }, [items]);
+
+  const deleteDuplicates = async () => {
     const logs: string[] = [];
     const addLog = (msg: string) => {
       logs.push(msg);
       setDupeProgress((p) => p ? { ...p, logs: [...logs] } : null);
     };
 
-    addLog(`Found ${dupeData.totalGroups} groups with duplicate rows (${dupeData.extraCount} extra entries).`);
+    addLog(`Found ${dupeData.totalGroups} groups with duplicate rows (${dupeData.extraCount} extras).`);
 
-    // For each dupe group, keep the best row, dismiss all other PENDING rows
-    const toDismiss: number[] = [];
+    const toDelete: number[] = [];
+    const mergeUpdates: { id: number; mergedPlaylists: string }[] = [];
 
     for (const [key, group] of dupeData.dupeGroups) {
-      // Sort: prefer pending > completed > downloading > dismissed, then most playlists
       const sorted = [...group].sort((a, b) => {
         const statusOrder: Record<string, number> = { pending: 0, completed: 1, downloading: 2, dismissed: 3 };
         const sa = statusOrder[a.status] ?? 4;
         const sb = statusOrder[b.status] ?? 4;
         if (sa !== sb) return sa - sb;
-        return parsePlaylistNames(b.spotifyPlaylistNames).length - parsePlaylistNames(a.spotifyPlaylistNames).length;
+        return b._plNames.length - a._plNames.length;
       });
 
       const kept = sorted[0];
-      const extras = sorted.slice(1).filter((i) => i.status === "pending");
+      const extras = sorted.slice(1);
 
       if (extras.length > 0) {
+        const allPlaylists = new Set<string>();
+        for (const item of group) {
+          for (const n of item._plNames) allPlaylists.add(n);
+        }
+        const merged = JSON.stringify(Array.from(allPlaylists).sort());
+        if (merged !== (kept.spotifyPlaylistNames || "[]")) {
+          mergeUpdates.push({ id: kept.id, mergedPlaylists: merged });
+        }
+
         const [artist, title] = key.split("::");
-        addLog(`"${title}" by ${artist} — keeping id:${kept.id}, dismissing ${extras.length} extra(s)`);
-        for (const e of extras) toDismiss.push(e.id);
+        addLog(`"${title}" by ${artist} — keeping id:${kept.id}, deleting ${extras.length} extra(s)`);
+        for (const e of extras) toDelete.push(e.id);
       }
     }
 
-    addLog(`${toDismiss.length} pending duplicates to dismiss.`);
+    addLog(`${toDelete.length} duplicate rows to delete.`);
 
-    if (toDismiss.length === 0) {
-      addLog("All duplicates are already dismissed — nothing to do.");
+    if (toDelete.length === 0) {
+      addLog("No duplicates to remove.");
       setDupeProgress({ active: false, total: 0, done: 0, logs: [...logs] });
       return;
     }
 
-    setDupeProgress({ active: true, total: toDismiss.length, done: 0, logs: [...logs] });
+    setDupeProgress({ active: true, total: toDelete.length, done: 0, logs: [...logs] });
 
-    // Process in batches of 200
+    if (mergeUpdates.length > 0) {
+      addLog(`Merging playlist names on ${mergeUpdates.length} surviving rows...`);
+      for (const upd of mergeUpdates) {
+        try {
+          await fetch("/api/wishlist", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: upd.id, playlistNames: upd.mergedPlaylists }),
+          });
+        } catch {}
+      }
+      addLog("Playlist names merged.");
+    }
+
     const BATCH_SIZE = 200;
-    let dismissed = 0;
+    let deleted = 0;
     let errors = 0;
 
-    for (let i = 0; i < toDismiss.length; i += BATCH_SIZE) {
-      const batch = toDismiss.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < toDelete.length; i += BATCH_SIZE) {
+      const batch = toDelete.slice(i, i + BATCH_SIZE);
       const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-      const totalBatches = Math.ceil(toDismiss.length / BATCH_SIZE);
+      const totalBatches = Math.ceil(toDelete.length / BATCH_SIZE);
 
-      addLog(`Batch ${batchNum}/${totalBatches}: dismissing ${batch.length} items...`);
+      addLog(`Batch ${batchNum}/${totalBatches}: deleting ${batch.length} rows...`);
 
       try {
         const res = await fetch("/api/wishlist", {
-          method: "PATCH",
+          method: "DELETE",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids: batch, status: "dismissed" }),
+          body: JSON.stringify({ ids: batch }),
         });
 
         if (!res.ok) {
@@ -187,40 +335,44 @@ export default function WishlistPage() {
           addLog(`ERROR: Batch ${batchNum} failed (${res.status}): ${errData.error || res.statusText}`);
           errors++;
         } else {
-          dismissed += batch.length;
-          addLog(`Batch ${batchNum} done — ${dismissed}/${toDismiss.length} dismissed.`);
+          deleted += batch.length;
+          addLog(`Batch ${batchNum} done — ${deleted}/${toDelete.length} deleted.`);
         }
       } catch (err) {
         addLog(`ERROR: Batch ${batchNum} network error: ${err instanceof Error ? err.message : String(err)}`);
         errors++;
       }
 
-      setDupeProgress((p) => p ? { ...p, done: dismissed } : null);
+      setDupeProgress((p) => p ? { ...p, done: deleted } : null);
     }
 
-    // Update local state
-    const dismissSet = new Set(toDismiss);
-    setItems((prev) =>
-      prev.map((i) => (dismissSet.has(i.id) ? { ...i, status: "dismissed" } : i))
+    const deleteSet = new Set(toDelete);
+    const mergeMap = new Map(mergeUpdates.map((u) => [u.id, u.mergedPlaylists]));
+    setRawItems((prev) =>
+      prev
+        .filter((i) => !deleteSet.has(i.id))
+        .map((i) => mergeMap.has(i.id) ? { ...i, spotifyPlaylistNames: mergeMap.get(i.id)! } : i)
     );
 
     if (errors > 0) {
-      addLog(`Completed with ${errors} error(s). ${dismissed} of ${toDismiss.length} dismissed.`);
-      setDupeProgress((p) => p ? { ...p, active: false, done: dismissed, error: `${errors} batch(es) failed` } : null);
+      addLog(`Completed with ${errors} error(s). ${deleted} of ${toDelete.length} deleted.`);
+      setDupeProgress((p) => p ? { ...p, active: false, done: deleted, error: `${errors} batch(es) failed` } : null);
     } else {
-      addLog(`Done! ${dismissed} duplicates dismissed successfully.`);
-      setDupeProgress((p) => p ? { ...p, active: false, done: dismissed } : null);
+      addLog(`Done! ${deleted} duplicates permanently deleted.`);
+      setDupeProgress((p) => p ? { ...p, active: false, done: deleted } : null);
     }
   };
 
-  const toggleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortDir(sortDir === "asc" ? "desc" : "asc");
-    } else {
-      setSortField(field);
+  const toggleSort = useCallback((field: SortField) => {
+    setSortField((prev) => {
+      if (prev === field) {
+        setSortDir((d) => d === "asc" ? "desc" : "asc");
+        return prev;
+      }
       setSortDir("asc");
-    }
-  };
+      return field;
+    });
+  }, []);
 
   const SortIcon = ({ field }: { field: SortField }) => {
     if (sortField !== field) return <ChevronsUpDown className="h-3 w-3 opacity-40" />;
@@ -229,115 +381,51 @@ export default function WishlistPage() {
       : <ChevronDown className="h-3 w-3" />;
   };
 
-  // Extract all unique playlist names for the dropdown
-  const allPlaylistNames = useMemo(() => {
-    const names = new Set<string>();
-    items
-      .filter((i) => i.type === "spotify_missing")
-      .forEach((i) => parsePlaylistNames(i.spotifyPlaylistNames).forEach((n) => names.add(n)));
-    return Array.from(names).sort((a, b) => a.localeCompare(b));
-  }, [items]);
-
-  // Build a map of normalized artist+title → item IDs (row-level duplicates)
-  const dupeData = useMemo(() => {
-    const spotify = items.filter((i) => i.type === "spotify_missing");
-    const groups = new Map<string, WishListItem[]>();
-    for (const item of spotify) {
-      const key = `${(item.seedArtist || "").trim().toLowerCase()}::${(item.seedTitle || "").trim().toLowerCase()}`;
-      const group = groups.get(key) || [];
-      group.push(item);
-      groups.set(key, group);
-    }
-    // Only groups with 2+ rows are duplicates
-    const dupeGroups = new Map<string, WishListItem[]>();
-    const dupeIdSet = new Set<number>();
-    let extraCount = 0;
-    let pendingExtras = 0;
-
-    for (const [key, group] of groups) {
-      if (group.length > 1) {
-        dupeGroups.set(key, group);
-        for (const item of group) dupeIdSet.add(item.id);
-        extraCount += group.length - 1;
-        // Count pending items that would be dismissed (all but the "best" one)
-        const sorted = [...group].sort((a, b) => {
-          // Prefer pending > completed > downloading > dismissed
-          const statusOrder: Record<string, number> = { pending: 0, completed: 1, downloading: 2, dismissed: 3 };
-          const sa = statusOrder[a.status] ?? 4;
-          const sb = statusOrder[b.status] ?? 4;
-          if (sa !== sb) return sa - sb;
-          // Among same status, prefer more playlists
-          return parsePlaylistNames(b.spotifyPlaylistNames).length - parsePlaylistNames(a.spotifyPlaylistNames).length;
-        });
-        // All except the first (best) that are pending can be dismissed
-        for (const item of sorted.slice(1)) {
-          if (item.status === "pending") pendingExtras++;
-        }
-      }
-    }
-
-    return { dupeGroups, dupeIdSet, totalGroups: dupeGroups.size, extraCount, pendingExtras };
-  }, [items]);
-
   const filteredAndSorted = useMemo(() => {
     let result = items.filter((i) => i.type === "spotify_missing");
 
-    // Status filter
     if (statusFilter !== "all") {
       result = result.filter((i) => i.status === statusFilter);
     }
 
-    // Duplicates filter — show all rows involved in duplicate groups
     if (duplicatesOnly) {
       result = result.filter((i) => dupeData.dupeIdSet.has(i.id));
     }
 
-    // Playlist filter
     if (playlistFilter !== "all") {
-      result = result.filter((i) =>
-        parsePlaylistNames(i.spotifyPlaylistNames).includes(playlistFilter)
-      );
+      result = result.filter((i) => i._plNames.includes(playlistFilter));
     }
 
-    // Search
-    if (search) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (i) =>
-          (i.seedTitle || "").toLowerCase().includes(q) ||
-          (i.seedArtist || "").toLowerCase().includes(q) ||
-          (i.seedAlbum || "").toLowerCase().includes(q) ||
-          parsePlaylistNames(i.spotifyPlaylistNames).some((p) => p.toLowerCase().includes(q))
-      );
+    if (debouncedSearch) {
+      const q = debouncedSearch.toLowerCase();
+      result = result.filter((i) => i._searchKey.includes(q));
     }
 
-    // Sort
     result.sort((a, b) => {
       let cmp = 0;
       if (sortField === "title") cmp = (a.seedTitle || "").localeCompare(b.seedTitle || "");
       else if (sortField === "artist") cmp = (a.seedArtist || "").localeCompare(b.seedArtist || "");
       else if (sortField === "album") cmp = (a.seedAlbum || "").localeCompare(b.seedAlbum || "");
       else if (sortField === "status") cmp = a.status.localeCompare(b.status);
-      else if (sortField === "playlists") {
-        const ap = parsePlaylistNames(a.spotifyPlaylistNames);
-        const bp = parsePlaylistNames(b.spotifyPlaylistNames);
-        cmp = ap.length - bp.length;
-      }
+      else if (sortField === "popularity") cmp = (a.popularity || 0) - (b.popularity || 0);
+      else if (sortField === "playlists") cmp = a._plNames.length - b._plNames.length;
       return sortDir === "asc" ? cmp : -cmp;
     });
 
     return result;
-  }, [items, search, sortField, sortDir, statusFilter, duplicatesOnly, playlistFilter, dupeData]);
+  }, [items, debouncedSearch, sortField, sortDir, statusFilter, duplicatesOnly, playlistFilter, dupeData]);
 
   const statusCounts = useMemo(() => {
-    const spotify = items.filter((i) => i.type === "spotify_missing");
-    return {
-      all: spotify.length,
-      pending: spotify.filter((i) => i.status === "pending").length,
-      downloading: spotify.filter((i) => i.status === "downloading").length,
-      completed: spotify.filter((i) => i.status === "completed").length,
-      dismissed: spotify.filter((i) => i.status === "dismissed").length,
-    };
+    let all = 0, pending = 0, downloading = 0, completed = 0, dismissed = 0;
+    for (const i of items) {
+      if (i.type !== "spotify_missing") continue;
+      all++;
+      if (i.status === "pending") pending++;
+      else if (i.status === "downloading") downloading++;
+      else if (i.status === "completed") completed++;
+      else if (i.status === "dismissed") dismissed++;
+    }
+    return { all, pending, downloading, completed, dismissed };
   }, [items]);
 
   const statusColor = (status: string) => {
@@ -349,6 +437,14 @@ export default function WishlistPage() {
       default: return "";
     }
   };
+
+  // Virtualizer — only renders visible rows
+  const rowVirtualizer = useVirtualizer({
+    count: filteredAndSorted.length,
+    getScrollElement: () => tableContainerRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 20,
+  });
 
   return (
     <motion.div
@@ -417,30 +513,23 @@ export default function WishlistPage() {
           >
             <Copy className="h-3 w-3" />
             Duplicates
-            <span className="opacity-60">
-              ({dupeData.extraCount}{dupeData.pendingExtras > 0 && dupeData.pendingExtras !== dupeData.extraCount
-                ? `, ${dupeData.pendingExtras} pending`
-                : ""})
-            </span>
+            <span className="opacity-60">({dupeData.extraCount})</span>
           </Button>
-          {duplicatesOnly && dupeData.pendingExtras > 0 && (
+          {duplicatesOnly && dupeData.extraCount > 0 && (
             <Button
               variant="outline"
               size="sm"
-              className="text-xs gap-1.5 text-orange-400 border-orange-400/30 hover:bg-orange-400/10"
-              onClick={dismissDuplicates}
+              className="text-xs gap-1.5 text-red-400 border-red-400/30 hover:bg-red-400/10"
+              onClick={deleteDuplicates}
               disabled={dupeProgress?.active}
             >
               {dupeProgress?.active ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
               ) : (
-                <X className="h-3 w-3" />
+                <Trash2 className="h-3 w-3" />
               )}
-              Remove {dupeData.pendingExtras} Dupes
+              Delete {dupeData.extraCount} Dupes
             </Button>
-          )}
-          {duplicatesOnly && dupeData.pendingExtras === 0 && dupeData.extraCount > 0 && (
-            <span className="text-xs text-muted-foreground">All dupes already dismissed</span>
           )}
         </div>
 
@@ -489,6 +578,25 @@ export default function WishlistPage() {
           )}
         </div>
 
+        {/* Push to Lidarr */}
+        {lidarrConfigured && statusCounts.pending > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-xs gap-1.5"
+            onClick={startLidarrPush}
+            disabled={lidarrPushRunning}
+          >
+            {lidarrPushRunning ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Package className="h-3 w-3" />
+            )}
+            Push to Lidarr
+            <span className="opacity-60">({statusCounts.pending})</span>
+          </Button>
+        )}
+
         {/* Clear filters */}
         {(duplicatesOnly || playlistFilter !== "all") && (
           <Button
@@ -521,10 +629,10 @@ export default function WishlistPage() {
                 )}
                 <span className="text-sm font-medium">
                   {dupeProgress.active
-                    ? `Removing duplicates... ${dupeProgress.done}/${dupeProgress.total}`
+                    ? `Deleting duplicates... ${dupeProgress.done}/${dupeProgress.total}`
                     : dupeProgress.error
                       ? `Completed with errors`
-                      : `Done — ${dupeProgress.done} duplicates removed`}
+                      : `Done — ${dupeProgress.done} duplicates deleted`}
                 </span>
               </div>
               {!dupeProgress.active && (
@@ -556,6 +664,74 @@ export default function WishlistPage() {
         </Card>
       )}
 
+      {/* Lidarr push progress panel */}
+      {lidarrPush && (
+        <Card>
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {lidarrPushRunning ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                ) : lidarrPush.status === "error" ? (
+                  <X className="h-4 w-4 text-red-400" />
+                ) : (
+                  <CheckCircle className="h-4 w-4 text-green-400" />
+                )}
+                <span className="text-sm font-medium">
+                  {lidarrPushRunning
+                    ? `Pushing to Lidarr... ${lidarrPush.processed}/${lidarrPush.totalArtists} artists`
+                    : lidarrPush.status === "error"
+                      ? "Push failed"
+                      : lidarrPush.status === "cancelled"
+                        ? "Push cancelled"
+                        : `Push complete — ${lidarrPush.added} artists added`}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {lidarrPushRunning && (
+                  <Button variant="outline" size="sm" className="h-7 text-xs" onClick={cancelLidarrPush}>
+                    <Ban className="h-3 w-3 mr-1" />
+                    Cancel
+                  </Button>
+                )}
+                {!lidarrPushRunning && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={() => setLidarrPush(null)}
+                  >
+                    <X className="h-3 w-3" />
+                  </Button>
+                )}
+              </div>
+            </div>
+            {lidarrPush.totalArtists > 0 && (
+              <Progress
+                value={lidarrPush.totalArtists > 0 ? (lidarrPush.processed / lidarrPush.totalArtists) * 100 : 0}
+                className="h-1.5"
+              />
+            )}
+            {lidarrPush.currentArtist && (
+              <p className="text-xs text-muted-foreground truncate">
+                {lidarrPush.currentArtist}
+              </p>
+            )}
+            <div className="flex gap-3 text-xs">
+              <span className="text-green-400">{lidarrPush.added} added</span>
+              <span className="text-muted-foreground">{lidarrPush.skipped} already in Lidarr</span>
+              <span className="text-blue-400">{lidarrPush.updatedItems} items updated</span>
+              {lidarrPush.errors > 0 && (
+                <span className="text-red-400">{lidarrPush.errors} errors</span>
+              )}
+            </div>
+            {lidarrPush.errorMessage && (
+              <p className="text-xs text-red-400">{lidarrPush.errorMessage}</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Results summary */}
       <p className="text-xs text-muted-foreground">
         Showing {filteredAndSorted.length} of {statusCounts.all} tracks
@@ -570,9 +746,9 @@ export default function WishlistPage() {
         <div className="py-16 text-center">
           <Heart className="h-16 w-16 text-muted-foreground mx-auto mb-4 opacity-50" />
           <p className="text-lg text-muted-foreground">
-            {items.length === 0 ? "No wishlist items yet" : "No items match your filter"}
+            {rawItems.length === 0 ? "No wishlist items yet" : "No items match your filter"}
           </p>
-          {items.length === 0 && (
+          {rawItems.length === 0 && (
             <p className="text-sm text-muted-foreground mt-1">
               Run a Spotify extraction from Settings to populate your wishlist
             </p>
@@ -581,142 +757,195 @@ export default function WishlistPage() {
       ) : (
         <Card>
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left">
-                    <th className="px-4 py-3 w-10"></th>
-                    <th className="px-2 py-3">
-                      <button
-                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                        onClick={() => toggleSort("title")}
-                      >
-                        Title <SortIcon field="title" />
-                      </button>
-                    </th>
-                    <th className="px-2 py-3">
-                      <button
-                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                        onClick={() => toggleSort("artist")}
-                      >
-                        Artist <SortIcon field="artist" />
-                      </button>
-                    </th>
-                    <th className="px-2 py-3">
-                      <button
-                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                        onClick={() => toggleSort("album")}
-                      >
-                        Album <SortIcon field="album" />
-                      </button>
-                    </th>
-                    <th className="px-2 py-3">
-                      <button
-                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                        onClick={() => toggleSort("playlists")}
-                      >
-                        Playlists <SortIcon field="playlists" />
-                      </button>
-                    </th>
-                    <th className="px-2 py-3">
-                      <button
-                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                        onClick={() => toggleSort("status")}
-                      >
-                        Status <SortIcon field="status" />
-                      </button>
-                    </th>
-                    <th className="px-4 py-3 text-right w-20">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredAndSorted.map((item) => {
-                    const plNames = parsePlaylistNames(item.spotifyPlaylistNames);
-                    return (
-                      <tr
-                        key={item.id}
-                        className="border-b border-border/50 hover:bg-secondary/30 transition-colors group"
-                      >
-                        <td className="px-4 py-2.5">
-                          <div className="w-8 h-8 rounded bg-secondary flex items-center justify-center shrink-0 overflow-hidden">
-                            {item.coverUrl ? (
-                              <Image
-                                src={item.coverUrl}
-                                alt={item.seedTitle || ""}
-                                width={32}
-                                height={32}
-                                className="object-cover"
-                              />
-                            ) : (
-                              <Music2 className="h-3 w-3 text-muted-foreground" />
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-2 py-2.5">
-                          <p className="font-medium truncate max-w-[200px]">{item.seedTitle || "Unknown"}</p>
-                        </td>
-                        <td className="px-2 py-2.5 text-muted-foreground">
-                          <p className="truncate max-w-[160px]">{item.seedArtist || "Unknown"}</p>
-                        </td>
-                        <td className="px-2 py-2.5 text-muted-foreground">
-                          <p className="truncate max-w-[160px]">{item.seedAlbum || ""}</p>
-                        </td>
-                        <td className="px-2 py-2.5">
-                          <div className="flex flex-wrap gap-1">
-                            {plNames.slice(0, 2).map((name, i) => (
-                              <Badge key={i} variant="outline" className="text-[10px] truncate max-w-[120px]">
-                                {name}
-                              </Badge>
-                            ))}
-                            {plNames.length > 2 && (
-                              <Badge variant="outline" className="text-[10px]">
-                                +{plNames.length - 2}
-                              </Badge>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-2 py-2.5">
-                          <span className={`text-xs capitalize ${statusColor(item.status)}`}>
-                            {item.status === "downloading" && (
-                              <Loader2 className="h-3 w-3 inline animate-spin mr-1" />
-                            )}
-                            {item.status === "completed" && (
-                              <CheckCircle className="h-3 w-3 inline mr-1" />
-                            )}
-                            {item.status}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                            {item.spotifyUri && (
-                              <a
-                                href={`https://open.spotify.com/track/${item.spotifyUri.replace("spotify:track:", "")}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <Button variant="ghost" size="icon" className="h-7 w-7">
-                                  <ExternalLink className="h-3 w-3" />
+            {/* Sticky header */}
+            <table className="w-full text-sm table-fixed">
+              <thead>
+                <tr className="border-b border-border text-left">
+                  <th className="px-4 py-3 w-12"></th>
+                  <th className="px-2 py-3 w-[18%]">
+                    <button
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => toggleSort("title")}
+                    >
+                      Title <SortIcon field="title" />
+                    </button>
+                  </th>
+                  <th className="px-2 py-3 w-[15%]">
+                    <button
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => toggleSort("artist")}
+                    >
+                      Artist <SortIcon field="artist" />
+                    </button>
+                  </th>
+                  <th className="px-2 py-3 w-[15%]">
+                    <button
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => toggleSort("album")}
+                    >
+                      Album <SortIcon field="album" />
+                    </button>
+                  </th>
+                  <th className="px-2 py-3 w-[16%]">
+                    <button
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => toggleSort("playlists")}
+                    >
+                      Playlists <SortIcon field="playlists" />
+                    </button>
+                  </th>
+                  <th className="px-2 py-3 w-20">
+                    <button
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => toggleSort("popularity")}
+                    >
+                      Pop. <SortIcon field="popularity" />
+                    </button>
+                  </th>
+                  <th className="px-2 py-3 w-20">
+                    <button
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => toggleSort("status")}
+                    >
+                      Status <SortIcon field="status" />
+                    </button>
+                  </th>
+                  <th className="px-4 py-3 text-right w-24">Actions</th>
+                </tr>
+              </thead>
+            </table>
+
+            {/* Virtualized scrollable body */}
+            <div
+              ref={tableContainerRef}
+              className="overflow-y-auto"
+              style={{ maxHeight: "calc(100vh - 420px)" }}
+            >
+              <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: "relative" }}>
+                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                  const item = filteredAndSorted[virtualRow.index] as EnrichedItem;
+                  return (
+                    <div
+                      key={item.id}
+                      className="absolute left-0 w-full border-b border-border/50 hover:bg-secondary/30 transition-colors group"
+                      style={{
+                        height: `${virtualRow.size}px`,
+                        transform: `translateY(${virtualRow.start}px)`,
+                      }}
+                    >
+                      <table className="w-full text-sm table-fixed">
+                        <tbody>
+                          <tr>
+                            <td className="px-4 py-1.5 w-12">
+                              <div className="w-8 h-8 rounded bg-secondary flex items-center justify-center shrink-0 overflow-hidden">
+                                {item.coverUrl ? (
+                                  <Image
+                                    src={item.coverUrl}
+                                    alt=""
+                                    width={32}
+                                    height={32}
+                                    className="object-cover"
+                                  />
+                                ) : (
+                                  <Music2 className="h-3 w-3 text-muted-foreground" />
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-2 py-1.5 w-[18%]">
+                              <p className="font-medium truncate">{item.seedTitle || "Unknown"}</p>
+                            </td>
+                            <td className="px-2 py-1.5 text-muted-foreground w-[15%]">
+                              <p className="truncate">{item.seedArtist || "Unknown"}</p>
+                            </td>
+                            <td className="px-2 py-1.5 text-muted-foreground w-[15%]">
+                              <p className="truncate">{item.seedAlbum || ""}</p>
+                            </td>
+                            <td className="px-2 py-1.5 w-[16%]">
+                              <div className="flex flex-wrap gap-1">
+                                {item._plNames.slice(0, 2).map((name, i) => (
+                                  <Badge key={i} variant="outline" className="text-[10px] truncate max-w-[120px]">
+                                    {name}
+                                  </Badge>
+                                ))}
+                                {item._plNames.length > 2 && (
+                                  <Badge variant="outline" className="text-[10px]">
+                                    +{item._plNames.length - 2}
+                                  </Badge>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-2 py-1.5 w-20">
+                              {item.popularity != null ? (
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-10 h-1.5 rounded-full bg-secondary overflow-hidden">
+                                    <div
+                                      className="h-full rounded-full"
+                                      style={{
+                                        width: `${item.popularity}%`,
+                                        backgroundColor: item.popularity >= 60 ? "#22c55e" : item.popularity >= 30 ? "#eab308" : "#6b7280",
+                                      }}
+                                    />
+                                  </div>
+                                  <span className="text-[10px] text-muted-foreground">{item.popularity}</span>
+                                </div>
+                              ) : (
+                                <span className="text-[10px] text-muted-foreground">—</span>
+                              )}
+                            </td>
+                            <td className="px-2 py-1.5 w-20">
+                              <span className={`text-xs capitalize ${statusColor(item.status)}`}>
+                                {item.status === "downloading" && (
+                                  <Loader2 className="h-3 w-3 inline animate-spin mr-1" />
+                                )}
+                                {item.status === "completed" && (
+                                  <CheckCircle className="h-3 w-3 inline mr-1" />
+                                )}
+                                {item.status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-1.5 w-24">
+                              <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                                {item.spotifyUri && (
+                                  <a
+                                    href={`https://open.spotify.com/track/${item.spotifyUri.replace("spotify:track:", "")}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <Button variant="ghost" size="icon" className="h-7 w-7">
+                                      <ExternalLink className="h-3 w-3" />
+                                    </Button>
+                                  </a>
+                                )}
+                                {item.status === "pending" && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7"
+                                    title="Dismiss"
+                                    onClick={() => dismissItem(item.id)}
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </Button>
+                                )}
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 text-red-400 hover:text-red-300"
+                                  title="Delete permanently"
+                                  onClick={() => deleteItem(item.id)}
+                                >
+                                  <Trash2 className="h-3 w-3" />
                                 </Button>
-                              </a>
-                            )}
-                            {item.status === "pending" && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7"
-                                onClick={() => dismissItem(item.id)}
-                              >
-                                <X className="h-3 w-3" />
-                              </Button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                              </div>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </CardContent>
         </Card>

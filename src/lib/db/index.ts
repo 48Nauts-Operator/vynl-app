@@ -282,6 +282,27 @@ sqlite.exec(`
     status TEXT NOT NULL DEFAULT 'pending',
     created_at TEXT DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS lidarr_config (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+    url TEXT NOT NULL,
+    api_key TEXT NOT NULL,
+    root_folder_path TEXT,
+    quality_profile_id INTEGER,
+    metadata_profile_id INTEGER,
+    last_tested_at TEXT,
+    last_test_result TEXT,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS watcher_config (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+    enabled INTEGER DEFAULT 0,
+    watch_paths TEXT NOT NULL DEFAULT '[]',
+    debounce_seconds INTEGER DEFAULT 10,
+    auto_delete_on_success INTEGER DEFAULT 1,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 // Migrations — add columns that may not exist in older databases
@@ -300,5 +321,10 @@ try {
 } catch {
   // Index already exists
 }
+
+// Add popularity column to spotify_tracks
+try { sqlite.prepare(`ALTER TABLE spotify_tracks ADD COLUMN popularity INTEGER`).run(); } catch { /* already exists */ }
+// Add popularity column to wish_list
+try { sqlite.prepare(`ALTER TABLE wish_list ADD COLUMN popularity INTEGER`).run(); } catch { /* already exists */ }
 
 export { schema };

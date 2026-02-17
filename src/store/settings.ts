@@ -10,6 +10,7 @@ export interface FeatureFlags {
   discover: boolean;
   tasteProfile: boolean;
   playlists: boolean;
+  developerMode: boolean;
 }
 
 interface SettingsState {
@@ -28,6 +29,7 @@ export const useSettingsStore = create<SettingsState>()(
         discover: true,
         tasteProfile: true,
         playlists: true,
+        developerMode: false,
       },
       toggleFeature: (key) =>
         set((state) => ({

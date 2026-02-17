@@ -34,6 +34,7 @@ import {
 import Image from "next/image";
 import { motion } from "framer-motion";
 import { formatDuration } from "@/lib/utils";
+import { VinylRating } from "@/components/ui/VinylRating";
 
 interface PlaylistInfo {
   id: number;
@@ -73,7 +74,8 @@ export default function PlaylistsPage() {
   const [overviewMode, setOverviewMode] = useState<"grid" | "list">("grid");
   const [sortField, setSortField] = useState<SortField>("position");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const { setQueue } = usePlayerStore();
+  const { setQueue, currentTrack, isPlaying, queueSource } = usePlayerStore();
+  const [ratingsMap, setRatingsMap] = useState<Record<number, number>>({});
 
   const fetchPlaylists = useCallback(async () => {
     const res = await fetch("/api/playlists");
@@ -88,8 +90,18 @@ export default function PlaylistsPage() {
   const fetchPlaylistTracks = async (id: number) => {
     const res = await fetch(`/api/playlists/${id}`);
     const data = await res.json();
-    setPlaylistTracks(data.tracks || []);
+    const tracks: PlaylistTrack[] = data.tracks || [];
+    setPlaylistTracks(tracks);
     setSelectedPlaylist(id);
+    // Fetch ratings for playlist tracks
+    const ids = tracks.map((t) => t.id).join(",");
+    if (ids) {
+      const rRes = await fetch(`/api/ratings?trackIds=${ids}`);
+      if (rRes.ok) {
+        const rData = await rRes.json();
+        setRatingsMap(rData.ratings || {});
+      }
+    }
   };
 
   const createPlaylist = async () => {
@@ -130,6 +142,15 @@ export default function PlaylistsPage() {
     setGenerating(false);
   };
 
+  const handleRateTrack = async (trackId: number, rating: number) => {
+    setRatingsMap((prev) => ({ ...prev, [trackId]: rating }));
+    await fetch(`/api/tracks/${trackId}/rating`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rating }),
+    });
+  };
+
   const playPlaylist = (index = 0) => {
     const sorted = getSortedTracks();
     const tracks: PlayerTrack[] = sorted.map((t) => ({
@@ -142,7 +163,7 @@ export default function PlaylistsPage() {
       coverPath: t.coverPath,
       source: "local",
     }));
-    setQueue(tracks, index);
+    setQueue(tracks, index, { type: "playlist", id: selectedPlaylist! });
   };
 
   const toggleSort = (field: SortField) => {
@@ -343,17 +364,31 @@ export default function PlaylistsPage() {
               {viewMode === "list" && (
                 <Card>
                   <CardContent className="p-0">
-                    {sortedTracks.map((track, i) => (
+                    {sortedTracks.map((track, i) => {
+                      const isActive = currentTrack?.id === track.id;
+                      return (
                       <div
                         key={track.id}
-                        className="flex items-center gap-4 px-4 py-2 hover:bg-secondary/30 transition-colors cursor-pointer group"
+                        className={`flex items-center gap-4 px-4 py-2 hover:bg-secondary/30 transition-colors cursor-pointer group ${isActive ? "bg-primary/10" : ""}`}
                         onClick={() => playPlaylist(i)}
                       >
                         <GripVertical className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100" />
-                        <span className="text-sm text-muted-foreground w-6 text-right group-hover:hidden">
-                          {track.position + 1}
-                        </span>
-                        <Play className="h-4 w-4 hidden group-hover:block text-primary" />
+                        {isActive && isPlaying ? (
+                          <span className="w-6 flex items-center justify-center">
+                            <span className="flex items-end gap-[2px] h-4">
+                              <span className="w-[3px] bg-primary animate-pulse" style={{ height: '60%', animationDelay: '0ms' }} />
+                              <span className="w-[3px] bg-primary animate-pulse" style={{ height: '100%', animationDelay: '150ms' }} />
+                              <span className="w-[3px] bg-primary animate-pulse" style={{ height: '40%', animationDelay: '300ms' }} />
+                            </span>
+                          </span>
+                        ) : (
+                          <>
+                            <span className={`text-sm w-6 text-right group-hover:hidden ${isActive ? "text-primary font-semibold" : "text-muted-foreground"}`}>
+                              {track.position + 1}
+                            </span>
+                            <Play className="h-4 w-4 hidden group-hover:block text-primary" />
+                          </>
+                        )}
                         <div className="w-10 h-10 rounded bg-secondary flex items-center justify-center shrink-0 overflow-hidden">
                           {track.coverPath ? (
                             <Image
@@ -368,18 +403,26 @@ export default function PlaylistsPage() {
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">
+                          <p className={`text-sm font-medium truncate ${isActive ? "text-primary" : ""}`}>
                             {track.title}
                           </p>
                           <p className="text-xs text-muted-foreground truncate">
                             {track.artist}
                           </p>
                         </div>
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <VinylRating
+                            rating={ratingsMap[track.id] ?? null}
+                            onChange={(r) => handleRateTrack(track.id, r)}
+                            size="sm"
+                          />
+                        </div>
                         <span className="text-sm text-muted-foreground">
                           {formatDuration(track.duration)}
                         </span>
                       </div>
-                    ))}
+                      );
+                    })}
                     {playlistTracks.length === 0 && (
                       <div className="py-12 text-center text-muted-foreground">
                         <ListMusic className="h-12 w-12 mx-auto mb-4 opacity-50" />
@@ -431,6 +474,9 @@ export default function PlaylistsPage() {
                                 Album <SortIcon field="album" />
                               </button>
                             </th>
+                            <th className="px-2 py-3">
+                              <span className="text-xs text-muted-foreground">Rating</span>
+                            </th>
                             <th className="px-4 py-3 text-right">
                               <button
                                 className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground ml-auto"
@@ -442,15 +488,27 @@ export default function PlaylistsPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {sortedTracks.map((track, i) => (
+                          {sortedTracks.map((track, i) => {
+                            const isActive = currentTrack?.id === track.id;
+                            return (
                             <tr
                               key={track.id}
-                              className="border-b border-border/50 hover:bg-secondary/30 transition-colors cursor-pointer group"
+                              className={`border-b border-border/50 hover:bg-secondary/30 transition-colors cursor-pointer group ${isActive ? "bg-primary/10" : ""}`}
                               onClick={() => playPlaylist(i)}
                             >
-                              <td className="px-4 py-2.5 text-muted-foreground">
-                                <span className="group-hover:hidden">{track.position + 1}</span>
-                                <Play className="h-4 w-4 hidden group-hover:block text-primary" />
+                              <td className="px-4 py-2.5">
+                                {isActive && isPlaying ? (
+                                  <span className="flex items-end gap-[2px] h-4">
+                                    <span className="w-[3px] bg-primary animate-pulse" style={{ height: '60%', animationDelay: '0ms' }} />
+                                    <span className="w-[3px] bg-primary animate-pulse" style={{ height: '100%', animationDelay: '150ms' }} />
+                                    <span className="w-[3px] bg-primary animate-pulse" style={{ height: '40%', animationDelay: '300ms' }} />
+                                  </span>
+                                ) : (
+                                  <>
+                                    <span className={`group-hover:hidden ${isActive ? "text-primary font-semibold" : "text-muted-foreground"}`}>{track.position + 1}</span>
+                                    <Play className="h-4 w-4 hidden group-hover:block text-primary" />
+                                  </>
+                                )}
                               </td>
                               <td className="px-2 py-2.5">
                                 <div className="w-8 h-8 rounded bg-secondary flex items-center justify-center shrink-0 overflow-hidden">
@@ -468,7 +526,7 @@ export default function PlaylistsPage() {
                                 </div>
                               </td>
                               <td className="px-2 py-2.5">
-                                <p className="font-medium truncate max-w-[200px]">{track.title}</p>
+                                <p className={`font-medium truncate max-w-[200px] ${isActive ? "text-primary" : ""}`}>{track.title}</p>
                               </td>
                               <td className="px-2 py-2.5 text-muted-foreground">
                                 <p className="truncate max-w-[180px]">{track.artist}</p>
@@ -476,11 +534,19 @@ export default function PlaylistsPage() {
                               <td className="px-2 py-2.5 text-muted-foreground">
                                 <p className="truncate max-w-[180px]">{track.album}</p>
                               </td>
+                              <td className="px-2 py-2.5" onClick={(e) => e.stopPropagation()}>
+                                <VinylRating
+                                  rating={ratingsMap[track.id] ?? null}
+                                  onChange={(r) => handleRateTrack(track.id, r)}
+                                  size="sm"
+                                />
+                              </td>
                               <td className="px-4 py-2.5 text-right text-muted-foreground">
                                 {formatDuration(track.duration)}
                               </td>
                             </tr>
-                          ))}
+                            );
+                          })}
                         </tbody>
                       </table>
                       {playlistTracks.length === 0 && (
@@ -516,7 +582,9 @@ export default function PlaylistsPage() {
                 </div>
               ) : overviewMode === "grid" ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {playlists.map((pl, i) => (
+                  {playlists.map((pl, i) => {
+                    const isActivePlaylist = isPlaying && queueSource?.type === "playlist" && queueSource.id === pl.id;
+                    return (
                     <motion.div
                       key={pl.id}
                       initial={{ opacity: 0, y: 20 }}
@@ -524,7 +592,7 @@ export default function PlaylistsPage() {
                       transition={{ delay: i * 0.05 }}
                     >
                       <Card
-                        className="hover:bg-secondary/50 transition-colors cursor-pointer group relative"
+                        className={`hover:bg-secondary/50 transition-colors cursor-pointer group relative ${isActivePlaylist ? "ring-2 ring-primary bg-primary/5" : ""}`}
                         onClick={() => fetchPlaylistTracks(pl.id)}
                       >
                         <CardContent className="p-4">
@@ -539,19 +607,31 @@ export default function PlaylistsPage() {
                             ) : (
                               <ListMusic className="h-10 w-10 text-muted-foreground" />
                             )}
-                            <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <Button
-                                size="icon"
-                                className="rounded-full h-10 w-10 shadow-lg"
-                              >
-                                <Play className="h-4 w-4 ml-0.5" />
-                              </Button>
-                            </div>
+                            {isActivePlaylist ? (
+                              <div className="absolute bottom-2 right-2">
+                                <div className="rounded-full h-10 w-10 shadow-lg bg-primary flex items-center justify-center">
+                                  <span className="flex items-end gap-[2px] h-4">
+                                    <span className="w-[3px] bg-primary-foreground animate-pulse" style={{ height: '60%', animationDelay: '0ms' }} />
+                                    <span className="w-[3px] bg-primary-foreground animate-pulse" style={{ height: '100%', animationDelay: '150ms' }} />
+                                    <span className="w-[3px] bg-primary-foreground animate-pulse" style={{ height: '40%', animationDelay: '300ms' }} />
+                                  </span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Button
+                                  size="icon"
+                                  className="rounded-full h-10 w-10 shadow-lg"
+                                >
+                                  <Play className="h-4 w-4 ml-0.5" />
+                                </Button>
+                              </div>
+                            )}
                           </div>
                           <div className="flex items-start justify-between">
                             <div className="min-w-0 flex-1">
-                              <p className="font-medium truncate">{pl.name}</p>
-                              <p className="text-xs text-muted-foreground">
+                              <p className={`font-medium truncate ${isActivePlaylist ? "text-primary" : ""}`}>{pl.name}</p>
+                              <span className="text-xs text-muted-foreground">
                                 {pl.trackCount} tracks
                                 {pl.isAutoGenerated && (
                                   <Badge
@@ -561,7 +641,7 @@ export default function PlaylistsPage() {
                                     AI
                                   </Badge>
                                 )}
-                              </p>
+                              </span>
                             </div>
                             <Button
                               variant="ghost"
@@ -578,7 +658,8 @@ export default function PlaylistsPage() {
                         </CardContent>
                       </Card>
                     </motion.div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <Card>
@@ -596,14 +677,16 @@ export default function PlaylistsPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {playlists.map((pl) => (
+                          {playlists.map((pl) => {
+                            const isActivePlaylist = isPlaying && queueSource?.type === "playlist" && queueSource.id === pl.id;
+                            return (
                             <tr
                               key={pl.id}
-                              className="border-b border-border/50 hover:bg-secondary/30 transition-colors cursor-pointer group"
+                              className={`border-b border-border/50 hover:bg-secondary/30 transition-colors cursor-pointer group ${isActivePlaylist ? "bg-primary/10" : ""}`}
                               onClick={() => fetchPlaylistTracks(pl.id)}
                             >
                               <td className="px-4 py-2.5">
-                                <div className="w-10 h-10 rounded bg-secondary flex items-center justify-center shrink-0 overflow-hidden relative">
+                                <div className={`w-10 h-10 rounded bg-secondary flex items-center justify-center shrink-0 overflow-hidden relative ${isActivePlaylist ? "ring-2 ring-primary" : ""}`}>
                                   {pl.coverPath ? (
                                     <Image
                                       src={pl.coverPath}
@@ -618,7 +701,16 @@ export default function PlaylistsPage() {
                                 </div>
                               </td>
                               <td className="px-2 py-2.5">
-                                <p className="font-medium truncate max-w-[240px]">{pl.name}</p>
+                                <div className="flex items-center gap-2">
+                                  {isActivePlaylist && (
+                                    <span className="flex items-end gap-[2px] h-3.5 shrink-0">
+                                      <span className="w-[2px] bg-primary animate-pulse" style={{ height: '60%', animationDelay: '0ms' }} />
+                                      <span className="w-[2px] bg-primary animate-pulse" style={{ height: '100%', animationDelay: '150ms' }} />
+                                      <span className="w-[2px] bg-primary animate-pulse" style={{ height: '40%', animationDelay: '300ms' }} />
+                                    </span>
+                                  )}
+                                  <p className={`font-medium truncate max-w-[240px] ${isActivePlaylist ? "text-primary" : ""}`}>{pl.name}</p>
+                                </div>
                               </td>
                               <td className="px-2 py-2.5 text-muted-foreground">
                                 <p className="truncate max-w-[280px]">{pl.description || "—"}</p>
@@ -652,7 +744,8 @@ export default function PlaylistsPage() {
                                 </div>
                               </td>
                             </tr>
-                          ))}
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>

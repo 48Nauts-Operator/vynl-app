@@ -14,6 +14,7 @@ Planned features for Vynl. Each feature has its own spec document.
 | 009 | [Usenet Music Downloads](009-usenet-integration.md) | Medium | Power User | Planned |
 | 010 | [Song Recognition (Shazam)](010-song-recognition.md) | Medium | Mobile / Core | Planned |
 | 011 | [Song Stories & Music Intelligence](011-song-stories.md) | High | Core | Planned |
+| 013 | [AI DJ Visual Backdrops (Veo 3)](013-dj-visual-backdrops.md) | Medium | DJ / Visual | Planned |
 
 ## Shipped
 

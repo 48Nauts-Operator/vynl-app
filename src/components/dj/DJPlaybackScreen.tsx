@@ -1,7 +1,7 @@
 // [VynlDJ] — extractable: Full-screen DJ playback experience
 "use client";
 
-import React, { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { motion } from "framer-motion";
 import { usePlayerStore } from "@/store/player";
 import { useDjStore, type DjTrack } from "@/store/dj";
@@ -14,21 +14,35 @@ import {
   Pause,
   SkipForward,
   SkipBack,
-  ListMusic,
   X,
   Headphones,
   FastForward,
+  Music,
+  Clock,
+  Disc3,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { formatDuration } from "@/lib/utils";
+
+// [VynlDJ] — extractable: energy phase derivation from set position
+function getSetPhase(position: number, total: number): { label: string; emoji: string } {
+  const pct = total > 0 ? position / total : 0;
+  if (pct < 0.10) return { label: "Opening", emoji: "\u{1F305}" };
+  if (pct < 0.25) return { label: "Warming Up", emoji: "\u{1F525}" };
+  if (pct < 0.40) return { label: "Building Energy", emoji: "\u{1F4C8}" };
+  if (pct < 0.55) return { label: "Peak Time", emoji: "\u{26A1}" };
+  if (pct < 0.65) return { label: "Breather", emoji: "\u{1F30A}" };
+  if (pct < 0.80) return { label: "Second Peak", emoji: "\u{1F680}" };
+  if (pct < 0.90) return { label: "Winding Down", emoji: "\u{1F319}" };
+  return { label: "Grand Finale", emoji: "\u{1F386}" };
+}
 
 interface Props {
   onExit: () => void;
 }
 
 export function DJPlaybackScreen({ onExit }: Props) {
-  const [showQueue, setShowQueue] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const controlsTimeout = React.useRef<NodeJS.Timeout>(null);
 
@@ -52,27 +66,24 @@ export function DJPlaybackScreen({ onExit }: Props) {
 
   const { session, setList } = useDjStore();
 
-  // Find the current track's DJ note
+  // Find the current track's DJ metadata
   const currentDjTrack = useMemo(() => {
     if (!currentTrack) return null;
     return setList.find((t) => t.id === currentTrack.id) ?? null;
   }, [currentTrack, setList]);
 
-  // Upcoming tracks (next 5)
+  // Upcoming tracks (next 3 for left panel)
   const upNext = useMemo(() => {
     if (queueIndex < 0) return [];
     return setList
       .filter((t) => t.position > (currentDjTrack?.position ?? -1))
-      .slice(0, 5);
+      .slice(0, 3);
   }, [setList, queueIndex, currentDjTrack]);
 
   // Set progress stats
   const setProgress = useMemo(() => {
     const currentPos = currentDjTrack?.position ?? 0;
     const total = setList.length;
-    const playedDuration = setList
-      .filter((t) => t.position < currentPos)
-      .reduce((sum, t) => sum + t.duration, 0);
     const remainingDuration =
       setList
         .filter((t) => t.position > currentPos)
@@ -82,8 +93,15 @@ export function DJPlaybackScreen({ onExit }: Props) {
       current: currentPos + 1,
       total,
       remainingMinutes: Math.round(remainingDuration / 60),
+      pct: total > 0 ? ((currentPos + 1) / total) * 100 : 0,
     };
   }, [setList, currentDjTrack, currentTrack, currentTime]);
+
+  // Energy phase from position
+  const phase = useMemo(
+    () => getSetPhase(currentDjTrack?.position ?? 0, setList.length),
+    [currentDjTrack, setList.length]
+  );
 
   // Mouse movement shows controls
   const handleMouseMove = useCallback(() => {
@@ -124,158 +142,215 @@ export function DJPlaybackScreen({ onExit }: Props) {
         </div>
       )}
 
-      {/* Main content */}
-      <div className="absolute inset-0 bottom-[100px] flex">
-        {/* Center: Album art + track info + DJ note */}
-        <div className={`flex-1 flex flex-col items-center justify-center gap-6 transition-all ${showQueue ? "mr-80" : ""}`}>
-          {/* Album art with breathing effect */}
+      {/* Main content — hero + split panels */}
+      <div className="absolute inset-0 bottom-[100px] flex flex-col">
+        {/* ── Hero Row ── */}
+        <div className="shrink-0 flex items-center gap-5 px-8 pt-6 pb-4">
+          {/* Cover art (compact) */}
           {currentTrack?.coverPath ? (
             <motion.div
-              animate={{
-                scale: isPlaying ? [1, 1.02, 1] : 1,
-              }}
-              transition={{
-                duration: 4,
-                repeat: Infinity,
-                ease: "easeInOut",
-              }}
-              className="w-72 h-72 md:w-80 md:h-80 rounded-2xl overflow-hidden shadow-2xl ring-1 ring-white/10"
+              animate={{ scale: isPlaying ? [1, 1.02, 1] : 1 }}
+              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+              className="w-20 h-20 rounded-xl overflow-hidden shadow-2xl ring-1 ring-white/10 shrink-0"
             >
               <Image
                 src={currentTrack.coverPath}
                 alt=""
-                width={320}
-                height={320}
+                width={80}
+                height={80}
                 className="object-cover w-full h-full"
               />
             </motion.div>
           ) : (
-            <div className="w-72 h-72 md:w-80 md:h-80 rounded-2xl bg-white/5 flex items-center justify-center">
-              <Headphones className="w-24 h-24 text-white/20" />
+            <div className="w-20 h-20 rounded-xl bg-white/5 flex items-center justify-center shrink-0">
+              <Headphones className="w-8 h-8 text-white/20" />
             </div>
           )}
 
           {/* Track info */}
-          <div className="text-center max-w-md px-4">
-            <h2 className="text-white text-3xl font-bold truncate">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-white text-2xl font-bold truncate">
               {currentTrack?.title || "No track"}
             </h2>
-            <p className="text-white/60 text-xl mt-1 truncate">
+            <p className="text-white/60 text-base truncate">
               {currentTrack?.artist}
+              {currentTrack?.album && (
+                <span className="text-white/30"> &middot; {currentTrack.album}</span>
+              )}
             </p>
-            <p className="text-white/30 text-sm mt-1 truncate">
-              {currentTrack?.album}
-            </p>
-            {/* BPM / Energy / Key badge */}
+            {/* BPM / Energy / Key badges */}
             {currentDjTrack?.bpm != null && (
-              <div className="flex items-center justify-center gap-3 mt-2 text-sm text-white/50">
-                <span className="font-mono">{Math.round(currentDjTrack.bpm)} BPM</span>
+              <div className="flex items-center gap-3 mt-1.5 text-sm">
+                <span className="font-mono text-white/50">
+                  {Math.round(currentDjTrack.bpm)} BPM
+                </span>
                 {currentDjTrack.energy != null && (
-                  <span>Energy {Math.round(currentDjTrack.energy * 10)}/10</span>
+                  <span className="text-white/50">
+                    Energy {Math.round(currentDjTrack.energy * 10)}/10
+                  </span>
                 )}
                 {currentDjTrack.key && (
-                  <span>{currentDjTrack.key}</span>
+                  <span className="text-white/40">{currentDjTrack.key}</span>
                 )}
                 {currentDjTrack.camelot && (
-                  <span className="text-xs bg-white/10 px-1.5 py-0.5 rounded">
+                  <span className="text-xs bg-white/10 text-white/50 px-1.5 py-0.5 rounded">
                     {currentDjTrack.camelot}
                   </span>
                 )}
               </div>
             )}
           </div>
-
-          {/* DJ note */}
-          {currentDjTrack?.djNote && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              key={currentDjTrack.id}
-              className="max-w-lg px-6 py-3 rounded-xl bg-white/5 backdrop-blur-sm border border-white/10"
-            >
-              <p className="text-white/70 text-sm italic text-center">
-                {currentDjTrack.djNote}
-              </p>
-            </motion.div>
-          )}
-
-          {/* Set progress */}
-          <p className="text-white/40 text-sm">
-            Track {setProgress.current} of {setProgress.total}
-            {setProgress.remainingMinutes > 0 &&
-              ` — ${setProgress.remainingMinutes}m remaining`}
-          </p>
-
-          {/* Up Next preview */}
-          {upNext.length > 0 && (
-            <div className="max-w-md w-full px-4">
-              <p className="text-white/40 text-xs uppercase tracking-wider mb-2">
-                Up Next
-              </p>
-              <div className="space-y-1.5">
-                {upNext.slice(0, 3).map((track, idx) => {
-                  // Calculate BPM diff from previous track
-                  const prevBpm = idx === 0
-                    ? currentDjTrack?.bpm
-                    : upNext[idx - 1]?.bpm;
-                  const bpmDiff = prevBpm != null && track.bpm != null
-                    ? Math.abs(track.bpm - prevBpm)
-                    : null;
-                  const bpmColor = bpmDiff == null
-                    ? "text-white/30"
-                    : bpmDiff <= 10
-                      ? "text-green-400/70"
-                      : bpmDiff <= 20
-                        ? "text-amber-400/70"
-                        : "text-red-400/70";
-
-                  return (
-                    <div
-                      key={track.id}
-                      className="flex items-center gap-3 text-white/50 text-sm"
-                    >
-                      {track.coverPath ? (
-                        <Image
-                          src={track.coverPath}
-                          alt=""
-                          width={32}
-                          height={32}
-                          className="w-8 h-8 rounded object-cover"
-                        />
-                      ) : (
-                        <div className="w-8 h-8 rounded bg-white/10" />
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-white/70">{track.title}</p>
-                        <p className="truncate text-white/40 text-xs">
-                          {track.artist}
-                        </p>
-                      </div>
-                      {track.bpm != null && (
-                        <span className={`text-xs font-mono shrink-0 ${bpmColor}`}>
-                          {Math.round(track.bpm)}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* Queue panel */}
-        {showQueue && (
+        {/* ── Divider ── */}
+        <div className="border-t border-white/10" />
+
+        {/* ── Split Panels ── */}
+        <div className="flex-1 flex min-h-0">
+          {/* ── Left Panel: Set Info ── */}
+          <div className="w-[40%] flex flex-col gap-5 px-8 py-5 overflow-y-auto">
+            {/* Phase card */}
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">{phase.emoji}</span>
+              <div>
+                <p className="text-white font-semibold text-lg">{phase.label}</p>
+                <p className="text-white/40 text-xs uppercase tracking-wider">Set Phase</p>
+              </div>
+            </div>
+
+            {/* DJ note for current track */}
+            {currentDjTrack?.djNote && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                key={currentDjTrack.id}
+                className="px-4 py-3 rounded-xl bg-white/5 backdrop-blur-sm border border-white/10"
+              >
+                <p className="text-white/70 text-sm italic">
+                  &ldquo;{currentDjTrack.djNote}&rdquo;
+                </p>
+              </motion.div>
+            )}
+
+            {/* Track progress bar */}
+            <div>
+              <div className="flex items-center justify-between text-xs text-white/40 mb-1.5">
+                <span>Track {setProgress.current}/{setProgress.total}</span>
+                <span>{setProgress.remainingMinutes}m remaining</span>
+              </div>
+              <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary rounded-full transition-all"
+                  style={{ width: `${setProgress.pct}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Session stats */}
+            {session && (
+              <div className="grid grid-cols-2 gap-3">
+                {session.vibe && (
+                  <div className="flex items-center gap-2 text-white/40 text-sm">
+                    <Disc3 className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{session.vibe}</span>
+                  </div>
+                )}
+                {session.occasion && (
+                  <div className="flex items-center gap-2 text-white/40 text-sm">
+                    <Music className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{session.occasion}</span>
+                  </div>
+                )}
+                {session.durationMinutes != null && (
+                  <div className="flex items-center gap-2 text-white/40 text-sm">
+                    <Clock className="h-4 w-4 shrink-0" />
+                    <span>{session.durationMinutes}m set</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Up Next */}
+            {upNext.length > 0 && (
+              <div>
+                <p className="text-white/40 text-xs uppercase tracking-wider mb-2">
+                  Up Next
+                </p>
+                <div className="space-y-1.5">
+                  {upNext.map((track, idx) => {
+                    const prevBpm = idx === 0
+                      ? currentDjTrack?.bpm
+                      : upNext[idx - 1]?.bpm;
+                    const bpmDiff = prevBpm != null && track.bpm != null
+                      ? Math.abs(track.bpm - prevBpm)
+                      : null;
+                    const bpmColor = bpmDiff == null
+                      ? "text-white/30"
+                      : bpmDiff <= 10
+                        ? "text-green-400/70"
+                        : bpmDiff <= 20
+                          ? "text-amber-400/70"
+                          : "text-red-400/70";
+
+                    return (
+                      <div
+                        key={track.id}
+                        className="flex items-center gap-3 text-white/50 text-sm"
+                      >
+                        {track.coverPath ? (
+                          <Image
+                            src={track.coverPath}
+                            alt=""
+                            width={32}
+                            height={32}
+                            className="w-8 h-8 rounded object-cover"
+                          />
+                        ) : (
+                          <div className="w-8 h-8 rounded bg-white/10" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-white/70">{track.title}</p>
+                          <p className="truncate text-white/40 text-xs">
+                            {track.artist}
+                          </p>
+                        </div>
+                        {track.bpm != null && (
+                          <span className={`text-xs font-mono shrink-0 ${bpmColor}`}>
+                            {Math.round(track.bpm)}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Session DJ notes */}
+            {session?.djNotes && (
+              <div className="mt-auto pt-4 border-t border-white/5">
+                <div className="flex items-start gap-2 text-white/30 text-xs">
+                  <Headphones className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  <p>{session.djNotes}</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Vertical divider ── */}
+          <div className="w-px bg-white/10" />
+
+          {/* ── Right Panel: Set List ── */}
           <DJQueuePanel
             setList={setList}
             currentTrackId={currentTrack?.id ?? null}
             onTrackClick={jumpToTrack}
-            onClose={() => setShowQueue(false)}
+            className="flex-1 min-w-0"
           />
-        )}
+        </div>
       </div>
 
-      {/* Bottom controls */}
+      {/* ── Bottom Controls ── */}
       <div
         className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent transition-opacity duration-500 ${
           showControls ? "opacity-100" : "opacity-0"
@@ -348,14 +423,6 @@ export function DJPlaybackScreen({ onExit }: Props) {
             <span className="text-white/40 text-sm">
               {formatDuration(currentTime)} / {formatDuration(duration)}
             </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={`hover:bg-white/10 ${showQueue ? "text-primary" : "text-white/60 hover:text-white"}`}
-              onClick={() => setShowQueue(!showQueue)}
-            >
-              <ListMusic className="h-5 w-5" />
-            </Button>
             <Link href="/" onClick={onExit}>
               <Button
                 variant="ghost"
@@ -388,16 +455,6 @@ export function DJPlaybackScreen({ onExit }: Props) {
             ) : (
               <span className="text-amber-400/60">Testing transitions</span>
             )}
-          </div>
-        </div>
-      )}
-
-      {/* DJ Notes banner */}
-      {session?.djNotes && showControls && !previewMode && (
-        <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/60 to-transparent">
-          <div className="flex items-center gap-2 text-white/50 text-sm max-w-2xl mx-auto text-center">
-            <Headphones className="h-4 w-4 shrink-0" />
-            <p className="truncate">{session.djNotes}</p>
           </div>
         </div>
       )}

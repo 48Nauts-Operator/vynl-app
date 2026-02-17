@@ -19,10 +19,16 @@ export interface Track {
   podcastEpisodeId?: number;
 }
 
+export interface QueueSource {
+  type: "album" | "playlist" | "dj" | "queue";
+  id?: number;
+}
+
 interface PlayerState {
   currentTrack: Track | null;
   queue: Track[];
   queueIndex: number;
+  queueSource: QueueSource | null;
   isPlaying: boolean;
   currentTime: number;
   duration: number;
@@ -37,7 +43,7 @@ interface PlayerState {
   crossfadeProgress: number; // 0-1, >0 means crossfade in progress
 
   setTrack: (track: Track) => void;
-  setQueue: (tracks: Track[], startIndex?: number) => void;
+  setQueue: (tracks: Track[], startIndex?: number, source?: QueueSource) => void;
   addToQueue: (track: Track) => void;
   playNext: () => void;
   playPrev: () => void;
@@ -59,13 +65,14 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   currentTrack: null,
   queue: [],
   queueIndex: -1,
+  queueSource: null,
   isPlaying: false,
   currentTime: 0,
   duration: 0,
   volume: 0.7,
-  outputTarget: "sonos",
-  sonosSpeaker: "Office",
-  systemDevice: null,
+  outputTarget: "browser",
+  sonosSpeaker: null,
+  systemDevice: "mac-studio",
   shuffled: false,
   repeatMode: "off",
   previewMode: false,
@@ -75,10 +82,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   setTrack: (track) =>
     set({ currentTrack: track, isPlaying: true, currentTime: 0 }),
 
-  setQueue: (tracks, startIndex = 0) =>
+  setQueue: (tracks, startIndex = 0, source) =>
     set({
       queue: tracks,
       queueIndex: startIndex,
+      queueSource: source || null,
       currentTrack: tracks[startIndex] || null,
       isPlaying: true,
       currentTime: 0,

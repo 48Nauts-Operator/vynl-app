@@ -3,8 +3,7 @@
 
 import React, { useRef, useEffect } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Button } from "@/components/ui/button";
-import { X, Music } from "lucide-react";
+import { Music } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDuration } from "@/lib/utils";
 import type { DjTrack } from "@/store/dj";
@@ -14,14 +13,14 @@ interface Props {
   setList: DjTrack[];
   currentTrackId: number | null;
   onTrackClick: (track: DjTrack) => void;
-  onClose: () => void;
+  className?: string;
 }
 
 export function DJQueuePanel({
   setList,
   currentTrackId,
   onTrackClick,
-  onClose,
+  className,
 }: Props) {
   const currentRef = useRef<HTMLButtonElement>(null);
 
@@ -33,20 +32,12 @@ export function DJQueuePanel({
   }, [currentTrackId]);
 
   return (
-    <div className="w-80 h-full bg-black/80 backdrop-blur-xl border-l border-white/10 flex flex-col">
+    <div className={cn("flex flex-col", className)}>
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-        <h3 className="text-white font-semibold text-sm uppercase tracking-wider">
+      <div className="px-4 py-3 border-b border-white/10">
+        <h3 className="text-white/60 font-semibold text-xs uppercase tracking-wider">
           Set List
         </h3>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="text-white/60 hover:text-white hover:bg-white/10 h-8 w-8"
-          onClick={onClose}
-        >
-          <X className="h-4 w-4" />
-        </Button>
       </div>
 
       {/* Track list */}

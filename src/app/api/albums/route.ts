@@ -8,6 +8,7 @@ export async function GET(request: NextRequest) {
     const sort = request.nextUrl.searchParams.get("sort") || "artist";
     const genre = request.nextUrl.searchParams.get("genre");
     const search = request.nextUrl.searchParams.get("search")?.trim();
+    const limit = request.nextUrl.searchParams.get("limit");
 
     let query = `
       SELECT
@@ -28,8 +29,17 @@ export async function GET(request: NextRequest) {
 
     if (search) {
       const like = `%${search}%`;
-      query += ` AND (album LIKE ? OR COALESCE(album_artist, artist) LIKE ? OR title LIKE ? OR genre LIKE ? OR CAST(year AS TEXT) LIKE ?)`;
-      params.push(like, like, like, like, like);
+      const isDecade = /^\d{2}$/.test(search);
+      if (isDecade) {
+        const d = parseInt(search, 10);
+        const start = d >= 50 ? 1900 + d : 2000 + d;
+        const end = start + 10;
+        query += ` AND (album LIKE ? OR COALESCE(album_artist, artist) LIKE ? OR title LIKE ? OR genre LIKE ? OR CAST(year AS TEXT) LIKE ? OR (year >= ? AND year < ?))`;
+        params.push(like, like, like, like, like, String(start), String(end));
+      } else {
+        query += ` AND (album LIKE ? OR COALESCE(album_artist, artist) LIKE ? OR title LIKE ? OR genre LIKE ? OR CAST(year AS TEXT) LIKE ?)`;
+        params.push(like, like, like, like, like);
+      }
     }
 
     if (genre) {
@@ -53,6 +63,11 @@ export async function GET(request: NextRequest) {
       default:
         query += ` ORDER BY album_artist ASC, year ASC, album ASC`;
         break;
+    }
+
+    if (limit && /^\d+$/.test(limit)) {
+      query += ` LIMIT ?`;
+      params.push(limit);
     }
 
     const sqlite = (db as any).session?.client || (db as any).$client;

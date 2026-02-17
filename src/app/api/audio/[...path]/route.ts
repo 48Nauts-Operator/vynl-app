@@ -41,6 +41,45 @@ export async function GET(
 
   const quality = request.nextUrl.searchParams.get("quality");
   const download = request.nextUrl.searchParams.get("download");
+  const sonosMode = request.nextUrl.searchParams.get("sonos") === "1";
+
+  // Sonos transcoding: FLAC/WAV/AIFF → MP3 320kbps for universal Sonos compatibility
+  if (sonosMode && [".flac", ".wav", ".aiff", ".alac"].includes(ext)) {
+    try {
+      const transcoded = await new Promise<Buffer>((resolve, reject) => {
+        const chunks: Buffer[] = [];
+        const ffmpeg = execFile(
+          "ffmpeg",
+          [
+            "-i", filePath,
+            "-c:a", "libmp3lame",
+            "-b:a", "320k",
+            "-f", "mp3",
+            "pipe:1",
+          ],
+          { maxBuffer: 100 * 1024 * 1024 },
+          (err) => {
+            if (err) reject(err);
+          }
+        );
+
+        ffmpeg.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
+        ffmpeg.stdout?.on("end", () => resolve(Buffer.concat(chunks)));
+        ffmpeg.on("error", reject);
+      });
+
+      return new Response(new Uint8Array(transcoded), {
+        headers: {
+          "Content-Length": transcoded.length.toString(),
+          "Content-Type": "audio/mpeg",
+          "Accept-Ranges": "none",
+        },
+      });
+    } catch (err) {
+      console.error("Sonos transcoding failed, serving original:", err);
+      // Fall through to serve original
+    }
+  }
 
   // Mobile transcoding: FLAC/WAV/AIFF → AAC 256kbps
   if (quality === "mobile" && [".flac", ".wav", ".aiff", ".alac"].includes(ext)) {

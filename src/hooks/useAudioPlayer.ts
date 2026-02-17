@@ -78,6 +78,10 @@ export function useAudioPlayer() {
           .split("/")
           .map((seg) => encodeURIComponent(seg))
           .join("/");
+        // Append ?sonos=1 to trigger server-side transcoding for lossless formats
+        const sonosParam = currentTrack.filePath.match(/\.(flac|wav|aiff|alac)$/i)
+          ? "?sonos=1"
+          : "";
         sonosPlayUriSent.current = true;
         fetch("/api/sonos/control", {
           method: "POST",
@@ -85,7 +89,7 @@ export function useAudioPlayer() {
           body: JSON.stringify({
             speaker: sonosSpeaker,
             action: "play-uri",
-            uri: `${vynlHost}/api/audio${encodedPath}`,
+            uri: `${vynlHost}/api/audio${encodedPath}${sonosParam}`,
           }),
         }).catch(console.error);
       } else if (currentTrack.sourceId && currentTrack.source === "spotify") {

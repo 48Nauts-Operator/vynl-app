@@ -309,6 +309,7 @@ export const spotifyTracks = sqliteTable("spotify_tracks", {
   energy: real("energy"),
   danceability: real("danceability"),
   valence: real("valence"),
+  popularity: integer("popularity"), // 0-100 Spotify global popularity
   audioKey: integer("audio_key"),
   audioMode: integer("audio_mode"),
   localTrackId: integer("local_track_id").references(() => tracks.id, { onDelete: "set null" }),
@@ -338,6 +339,7 @@ export const wishList = sqliteTable("wish_list", {
   isrc: text("isrc"),
   coverUrl: text("cover_url"),
   spotifyPlaylistNames: text("spotify_playlist_names"), // JSON array
+  popularity: integer("popularity"), // 0-100 Spotify global popularity
   status: text("status").notNull().default("pending"), // "pending" | "downloading" | "completed" | "dismissed"
   createdAt: text("created_at").default(sql`(datetime('now'))`),
 });
@@ -347,3 +349,32 @@ export type SpotifySnapshot = typeof spotifySnapshots.$inferSelect;
 export type SpotifyPlaylist = typeof spotifyPlaylists.$inferSelect;
 export type SpotifyTrack = typeof spotifyTracks.$inferSelect;
 export type WishListItem = typeof wishList.$inferSelect;
+
+// ---------- Lidarr Integration ----------
+
+export const lidarrConfig = sqliteTable("lidarr_config", {
+  id: integer("id").primaryKey().default(1),
+  url: text("url").notNull(),
+  apiKey: text("api_key").notNull(),
+  rootFolderPath: text("root_folder_path"),
+  qualityProfileId: integer("quality_profile_id"),
+  metadataProfileId: integer("metadata_profile_id"),
+  lastTestedAt: text("last_tested_at"),
+  lastTestResult: text("last_test_result"),
+  updatedAt: text("updated_at").default(sql`(datetime('now'))`),
+});
+
+export type LidarrConfig = typeof lidarrConfig.$inferSelect;
+
+// ---------- File Watcher ----------
+
+export const watcherConfig = sqliteTable("watcher_config", {
+  id: integer("id").primaryKey().default(1),
+  enabled: integer("enabled", { mode: "boolean" }).default(false),
+  watchPaths: text("watch_paths").notNull().default("[]"), // JSON array of strings
+  debounceSeconds: integer("debounce_seconds").default(10),
+  autoDeleteOnSuccess: integer("auto_delete_on_success", { mode: "boolean" }).default(true),
+  updatedAt: text("updated_at").default(sql`(datetime('now'))`),
+});
+
+export type WatcherConfig = typeof watcherConfig.$inferSelect;

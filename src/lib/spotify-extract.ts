@@ -160,6 +160,7 @@ async function runExtraction(job: ExtractJob) {
       duration_ms: number;
       preview_url: string | null;
       external_ids?: { isrc?: string };
+      popularity?: number;
     } | null;
     is_local: boolean;
   }
@@ -171,7 +172,7 @@ async function runExtraction(job: ExtractJob) {
 
     let position = 0;
     for await (const item of paginatedFetch<SpotifyPlaylistTrackItem>(
-      `/playlists/${pl.id}/tracks?limit=100&fields=items(track(id,uri,name,artists,album,duration_ms,preview_url,external_ids),is_local),next`
+      `/playlists/${pl.id}/tracks?limit=100&fields=items(track(id,uri,name,artists,album,duration_ms,preview_url,external_ids,popularity),is_local),next`
     )) {
       if (job.status === "cancelled") return;
       if (!item.track || item.is_local || !item.track.id) {
@@ -195,6 +196,7 @@ async function runExtraction(job: ExtractJob) {
           durationMs: t.duration_ms,
           coverUrl: t.album?.images?.[0]?.url || null,
           previewUrl: t.preview_url || null,
+          popularity: t.popularity ?? null,
         }).run();
         dbId = Number(res.lastInsertRowid);
         spotifyIdToDbId.set(t.id, dbId);
@@ -227,6 +229,7 @@ async function runExtraction(job: ExtractJob) {
       duration_ms: number;
       preview_url: string | null;
       external_ids?: { isrc?: string };
+      popularity?: number;
     };
   }
 
@@ -250,6 +253,7 @@ async function runExtraction(job: ExtractJob) {
         durationMs: t.duration_ms,
         coverUrl: t.album?.images?.[0]?.url || null,
         previewUrl: t.preview_url || null,
+        popularity: t.popularity ?? null,
         isLikedSong: true,
       }).run();
       dbId = Number(res.lastInsertRowid);
@@ -388,6 +392,11 @@ async function runExtraction(job: ExtractJob) {
 
   // ── Phase 7: Populate wishlist with unmatched tracks ──
   job.phase = "wishlist";
+  job.phaseDetail = "Clearing old wishlist items...";
+
+  // Remove old spotify_missing items so re-extraction doesn't duplicate
+  db.delete(wishList).where(eq(wishList.type, "spotify_missing")).run();
+
   job.phaseDetail = "Populating wishlist...";
 
   const unmatchedRows = db.select().from(spotifyTracks)
@@ -418,6 +427,7 @@ async function runExtraction(job: ExtractJob) {
       isrc: ut.isrc,
       coverUrl: ut.coverUrl,
       spotifyPlaylistNames: JSON.stringify(playlistNames),
+      popularity: ut.popularity,
       status: "pending",
     }).run();
   }

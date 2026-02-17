@@ -73,6 +73,15 @@ interface HeavyRotation {
   tracks: Track[];
 }
 
+interface RecentAlbum {
+  album: string;
+  album_artist: string;
+  cover_path: string | null;
+  track_count: number;
+  year: number | null;
+  latest_added: string;
+}
+
 interface ImportJob {
   status: "idle" | "running" | "complete" | "error";
   total?: number;
@@ -91,6 +100,7 @@ export default function HomePage() {
   const [profileExists, setProfileExists] = useState(false);
   const [stats, setStats] = useState<StatsData | null>(null);
   const [heavyRotation, setHeavyRotation] = useState<HeavyRotation | null>(null);
+  const [recentAlbums, setRecentAlbums] = useState<RecentAlbum[]>([]);
   const [importJob, setImportJob] = useState<ImportJob>({ status: "idle" });
   const { setQueue } = usePlayerStore();
 
@@ -118,6 +128,11 @@ export default function HomePage() {
     fetch("/api/library/stats?period=4weeks")
       .then((r) => r.json())
       .then((d) => setStats(d))
+      .catch(() => {});
+
+    fetch("/api/albums?sort=recent&limit=10")
+      .then((r) => r.json())
+      .then((d) => setRecentAlbums(d.albums || []))
       .catch(() => {});
 
     // Trigger Heavy Rotation auto-generation
@@ -345,6 +360,46 @@ export default function HomePage() {
                   <p className="text-xs text-muted-foreground truncate">{track.artist}</p>
                 </CardContent>
               </Card>
+            ))}
+          </div>
+        </motion.div>
+      )}
+
+      {/* Recently Added */}
+      {recentAlbums.length > 0 && (
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+          <div className="flex items-center gap-2 mb-4">
+            <FolderInput className="h-5 w-5 text-primary" />
+            <h2 className="text-xl font-semibold">Recently Added</h2>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+            {recentAlbums.slice(0, 10).map((album) => (
+              <Link
+                key={`${album.album_artist}-${album.album}`}
+                href={`/albums/${encodeURIComponent(`${album.album_artist}---${album.album}`)}`}
+              >
+                <Card className="hover:bg-secondary/50 transition-colors cursor-pointer">
+                  <CardContent className="p-4">
+                    <div className="aspect-square rounded-lg bg-secondary mb-3 flex items-center justify-center overflow-hidden relative">
+                      {album.cover_path ? (
+                        <Image
+                          src={album.cover_path}
+                          alt={album.album}
+                          fill
+                          sizes="200px"
+                          className="object-cover"
+                        />
+                      ) : (
+                        <Disc3 className="h-10 w-10 text-muted-foreground" />
+                      )}
+                    </div>
+                    <p className="font-medium truncate text-sm">{album.album}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {album.album_artist}
+                    </p>
+                  </CardContent>
+                </Card>
+              </Link>
             ))}
           </div>
         </motion.div>

@@ -15,7 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { usePlayerStore, Track as PlayerTrack } from "@/store/player";
-import { Play, Pause, Shuffle, Disc3, Loader2, Clock, ImageIcon, Pencil, Archive, ListPlus, Star } from "lucide-react";
+import { Play, Pause, Shuffle, Disc3, Loader2, Clock, ImageIcon, Pencil, Archive, ListPlus, Star, ChevronsUpDown, ChevronUp, ChevronDown } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatDuration } from "@/lib/utils";
 import { CoverSearchDialog } from "@/components/albums/CoverSearchDialog";
@@ -122,6 +122,12 @@ export default function AlbumDetailPage() {
   // Ratings
   const [ratingsMap, setRatingsMap] = useState<Record<number, number>>({});
 
+  // Sorting
+  type SortField = "trackNumber" | "title" | "artist" | "genre" | "year" | "rating" | "duration";
+  type SortDir = "asc" | "desc";
+  const [sortField, setSortField] = useState<SortField>("trackNumber");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
   useEffect(() => {
     async function load() {
       const res = await fetch(`/api/albums/${params.id}`);
@@ -168,6 +174,40 @@ export default function AlbumDetailPage() {
     );
   }
 
+  const toggleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortDir("asc");
+    }
+  };
+
+  const SortIcon = ({ field }: { field: SortField }) => {
+    if (sortField !== field) return <ChevronsUpDown className="h-3 w-3 opacity-40" />;
+    return sortDir === "asc"
+      ? <ChevronUp className="h-3 w-3" />
+      : <ChevronDown className="h-3 w-3" />;
+  };
+
+  const getSortedTracks = () => {
+    if (sortField === "trackNumber") {
+      return sortDir === "asc"
+        ? [...album.tracks]
+        : [...album.tracks].reverse();
+    }
+    return [...album.tracks].sort((a, b) => {
+      let cmp = 0;
+      if (sortField === "title") cmp = a.title.localeCompare(b.title);
+      else if (sortField === "artist") cmp = a.artist.localeCompare(b.artist);
+      else if (sortField === "genre") cmp = (a.genre || "").localeCompare(b.genre || "");
+      else if (sortField === "year") cmp = (a.year || 0) - (b.year || 0);
+      else if (sortField === "rating") cmp = (ratingsMap[a.id] || 0) - (ratingsMap[b.id] || 0);
+      else if (sortField === "duration") cmp = a.duration - b.duration;
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  };
+
   const playAll = () => {
     setQueue(album.tracks.map(toPlayerTrack), 0);
   };
@@ -177,8 +217,10 @@ export default function AlbumDetailPage() {
     setQueue(shuffled.map(toPlayerTrack), 0);
   };
 
-  const playTrack = (index: number) => {
-    setQueue(album.tracks.map(toPlayerTrack), index);
+  const playTrack = (track: AlbumTrack) => {
+    const sorted = getSortedTracks();
+    const idx = sorted.findIndex((t) => t.id === track.id);
+    setQueue(sorted.map(toPlayerTrack), idx >= 0 ? idx : 0);
   };
 
   const startRenameTrack = (track: AlbumTrack) => {
@@ -329,17 +371,33 @@ export default function AlbumDetailPage() {
       {/* Tracklist */}
       <Card>
         <CardContent className="p-0">
-          <div className="grid grid-cols-[40px_1fr_120px_80px] gap-4 px-4 py-2 text-xs text-muted-foreground uppercase tracking-wider border-b border-border">
-            <span>#</span>
-            <span>Title</span>
-            <span>Rating</span>
-            <span className="text-right">
-              <Clock className="h-3 w-3 inline" />
-            </span>
+          <div className="grid grid-cols-[40px_2fr_1fr_minmax(60px,auto)_minmax(50px,auto)_120px_80px] gap-4 px-4 py-2 text-xs text-muted-foreground uppercase tracking-wider border-b border-border">
+            <button className="flex items-center gap-1 hover:text-foreground transition-colors" onClick={() => toggleSort("trackNumber")}>
+              # <SortIcon field="trackNumber" />
+            </button>
+            <button className="flex items-center gap-1 hover:text-foreground transition-colors" onClick={() => toggleSort("title")}>
+              Title <SortIcon field="title" />
+            </button>
+            <button className="flex items-center gap-1 hover:text-foreground transition-colors" onClick={() => toggleSort("artist")}>
+              Artist <SortIcon field="artist" />
+            </button>
+            <button className="flex items-center gap-1 hover:text-foreground transition-colors" onClick={() => toggleSort("genre")}>
+              Genre <SortIcon field="genre" />
+            </button>
+            <button className="flex items-center gap-1 hover:text-foreground transition-colors" onClick={() => toggleSort("year")}>
+              Year <SortIcon field="year" />
+            </button>
+            <button className="flex items-center gap-1 hover:text-foreground transition-colors" onClick={() => toggleSort("rating")}>
+              Rating <SortIcon field="rating" />
+            </button>
+            <button className="flex items-center gap-1 justify-end hover:text-foreground transition-colors" onClick={() => toggleSort("duration")}>
+              <Clock className="h-3 w-3" /> <SortIcon field="duration" />
+            </button>
           </div>
-          {album.tracks.map((track, i) => {
-            const prevTrack = album.tracks[i - 1];
+          {(() => { const sorted = getSortedTracks(); return sorted.map((track, i) => {
+            const prevTrack = sorted[i - 1];
             const showDiscHeader =
+              sortField === "trackNumber" &&
               hasMultipleDiscs &&
               (!prevTrack || prevTrack.discNumber !== track.discNumber);
             const isActive = currentTrack?.id === track.id;
@@ -355,8 +413,8 @@ export default function AlbumDetailPage() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: i * 0.02 }}
-                  className={`grid grid-cols-[40px_1fr_120px_80px] gap-4 px-4 py-2 hover:bg-secondary/30 transition-colors cursor-pointer group items-center ${isActive ? "bg-primary/10" : ""}`}
-                  onClick={() => playTrack(i)}
+                  className={`grid grid-cols-[40px_2fr_1fr_minmax(60px,auto)_minmax(50px,auto)_120px_80px] gap-4 px-4 py-2 hover:bg-secondary/30 transition-colors cursor-pointer group items-center ${isActive ? "bg-primary/10" : ""}`}
+                  onClick={() => playTrack(track)}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     setTrackMenu({ x: e.clientX, y: e.clientY, track, index: i });
@@ -380,12 +438,16 @@ export default function AlbumDetailPage() {
                   )}
                   <div className="min-w-0">
                     <p className={`text-sm font-medium truncate ${isActive ? "text-primary" : ""}`}>{track.title}</p>
-                    {track.artist !== album.albumArtist && (
-                      <p className={`text-xs truncate ${isActive ? "text-primary/70" : "text-muted-foreground"}`}>
-                        {track.artist}
-                      </p>
-                    )}
                   </div>
+                  <p className={`text-xs truncate ${isActive ? "text-primary/70" : "text-muted-foreground"}`}>
+                    {track.artist}
+                  </p>
+                  <p className={`text-xs truncate ${isActive ? "text-primary/70" : "text-muted-foreground"}`}>
+                    {track.genre || "\u2014"}
+                  </p>
+                  <p className={`text-xs ${isActive ? "text-primary/70" : "text-muted-foreground"}`}>
+                    {track.year || "\u2014"}
+                  </p>
                   <div onClick={(e) => e.stopPropagation()}>
                     <VinylRating
                       rating={ratingsMap[track.id] ?? null}
@@ -399,7 +461,7 @@ export default function AlbumDetailPage() {
                 </motion.div>
               </React.Fragment>
             );
-          })}
+          }); })()}
         </CardContent>
       </Card>
 
@@ -412,7 +474,7 @@ export default function AlbumDetailPage() {
           <button
             className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
             onClick={() => {
-              playTrack(trackMenu.index);
+              playTrack(trackMenu.track);
               setTrackMenu(null);
             }}
           >
