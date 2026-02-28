@@ -53,19 +53,16 @@ export async function POST(request: NextRequest) {
       }
 
       for (const [sourceId, sourcePath] of Object.entries(data.trackMap)) {
-        // Apply reverse remap: our remap transforms DB paths → local paths
-        // Source paths are already local to that instance, we need to find ours
-        let localPath = sourcePath;
-        // Try to find by the path as-is, or by applying our own remap
+        // Try to find by the path as-is, or by applying our own remap rules
         const localTrack = db.select({ id: tracks.id }).from(tracks)
-          .where(eq(tracks.filePath, localPath)).get();
+          .where(eq(tracks.filePath, sourcePath)).get();
 
         if (localTrack) {
           idMap.set(Number(sourceId), localTrack.id);
         } else {
           // Try all remap rules to find a match
           for (const rule of remapRules) {
-            const testPath = localPath.replace(rule.from, rule.to);
+            const testPath = sourcePath.replace(rule.from, rule.to);
             const match = db.select({ id: tracks.id }).from(tracks)
               .where(eq(tracks.filePath, testPath)).get();
             if (match) {
