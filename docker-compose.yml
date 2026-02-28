@@ -25,6 +25,8 @@ services:
     environment:
       - MUSIC_LIBRARY_PATH=/music/library
       - BEETS_DB_PATH=/music/library.db
+      - BEETS_PATH_REMAP=/Volumes/Music::/music
+      - VYNL_DB_DIR=/app/data
       - PODCAST_STORAGE_PATH=/music/podcasts
       - VYNL_HOST=http://${HOST_IP:-localhost}:3101
       - NEXT_PUBLIC_VYNL_HOST=http://${HOST_IP:-localhost}:3101

@@ -3,7 +3,9 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema";
 import path from "path";
 
-const DB_PATH = path.join(process.cwd(), "vynl.db");
+// Use /app/data in Docker (persistent volume) or cwd in dev
+const dbDir = process.env.VYNL_DB_DIR || process.cwd();
+const DB_PATH = path.join(dbDir, "vynl.db");
 
 const sqlite = new Database(DB_PATH);
 sqlite.pragma("journal_mode = WAL");
