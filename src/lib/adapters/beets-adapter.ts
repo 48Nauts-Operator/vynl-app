@@ -93,9 +93,16 @@ export class BeetsAdapter implements MusicSourceAdapter {
       const mm = await import("music-metadata");
       const albumCoverCache = new Map<string, { data: Buffer; format: string } | null>();
 
-      // Remap paths if BEETS_PATH_REMAP is set (e.g. "/Volumes/Music:/Volumes/Music-1")
+      // Remap paths if BEETS_PATH_REMAP is set
+      // Supports multiple rules separated by ";": "/Volumes/Music::/music;/Volumes/Music-1::/music"
       const pathRemap = process.env.BEETS_PATH_REMAP;
-      const [remapFrom, remapTo] = pathRemap ? pathRemap.split("::") : [null, null];
+      const remapRules: { from: string; to: string }[] = [];
+      if (pathRemap) {
+        for (const rule of pathRemap.split(";")) {
+          const [from, to] = rule.split("::");
+          if (from && to) remapRules.push({ from, to });
+        }
+      }
 
       let current = 0;
       for (const row of rows) {
@@ -105,8 +112,11 @@ export class BeetsAdapter implements MusicSourceAdapter {
         let filePath = decodePath(row.path);
         if (!filePath) continue;
 
-        if (remapFrom && remapTo && filePath.startsWith(remapFrom + "/")) {
-          filePath = remapTo + filePath.slice(remapFrom.length);
+        for (const rule of remapRules) {
+          if (filePath.startsWith(rule.from + "/") && !filePath.startsWith(rule.to + "/")) {
+            filePath = rule.to + filePath.slice(rule.from.length);
+            break;
+          }
         }
 
         // Check the file actually exists
@@ -122,8 +132,11 @@ export class BeetsAdapter implements MusicSourceAdapter {
         // Read cover art: try artpath first, fall back to embedded art
         let coverData: { data: Buffer; format: string } | undefined;
         let artPath = decodePath(row.artpath);
-        if (artPath && remapFrom && remapTo && artPath.startsWith(remapFrom + "/")) {
-          artPath = remapTo + artPath.slice(remapFrom.length);
+        for (const rule of remapRules) {
+          if (artPath && artPath.startsWith(rule.from + "/") && !artPath.startsWith(rule.to + "/")) {
+            artPath = rule.to + artPath.slice(rule.from.length);
+            break;
+          }
         }
         if (artPath) {
           try {
