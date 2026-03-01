@@ -8,14 +8,9 @@ services:
     ports:
       - "3101:3101"
     volumes:
-      # ──────────────────────────────────────────────────────────────
-      # IMPORTANT: Update the path below to match your UGREEN NAS
-      # Check in UGOS File Manager for the actual path to your Music share
-      # Common UGREEN paths: /volume1/Music  or  /mnt/dm-0/Music
-      # ──────────────────────────────────────────────────────────────
-      - /volume1/Music/library:/music/library:ro
-      - /volume1/Music/library.db:/music/library.db
-      - /volume1/Music/podcasts:/music/podcasts
+      - /volume1/Media/library:/music/library:ro
+      - /volume1/Media/library.db:/music/library.db
+      - /volume1/Media/podcasts:/music/podcasts
       # Persistent app data (survives container restarts)
       - vynl-data:/app/data
       - vynl-covers:/app/public/covers
