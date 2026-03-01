@@ -188,6 +188,85 @@ export async function POST(request: NextRequest) {
       } catch { /* skip */ }
     }
 
+    // Import podcasts
+    let podcastsImported = 0;
+    let episodesImported = 0;
+    let insightsImported = 0;
+    const podcastIdMap = new Map<number, number>();
+
+    const podcastsData = (exportData.podcasts || []) as Record<string, unknown>[];
+    for (const pc of podcastsData) {
+      const srcId = f(pc, "id", "id") as number;
+      const feedUrl = f(pc, "feedUrl", "feed_url") as string;
+      try {
+        const result = sqlite.prepare(
+          `INSERT OR IGNORE INTO podcasts (title, author, description, feed_url, cover_url, cover_path, last_fetched_at, added_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(
+          f(pc, "title", "title"),
+          f(pc, "author", "author") || null,
+          f(pc, "description", "description") || null,
+          feedUrl,
+          f(pc, "coverUrl", "cover_url") || null,
+          f(pc, "coverPath", "cover_path") || null,
+          f(pc, "lastFetchedAt", "last_fetched_at") || null,
+          f(pc, "addedAt", "added_at") || null,
+        );
+        if (result.changes > 0) {
+          podcastIdMap.set(srcId, result.lastInsertRowid as number);
+          podcastsImported++;
+        } else {
+          // Already exists — find its ID by feed_url
+          const existing = sqlite.prepare(`SELECT id FROM podcasts WHERE feed_url = ?`).get(feedUrl) as { id: number } | undefined;
+          if (existing) podcastIdMap.set(srcId, existing.id);
+        }
+      } catch { /* skip */ }
+    }
+
+    const episodesData = (exportData.podcastEpisodes || []) as Record<string, unknown>[];
+    for (const ep of episodesData) {
+      const srcPodcastId = (f(ep, "podcastId", "podcast_id") ?? 0) as number;
+      const newPodcastId = podcastIdMap.get(srcPodcastId);
+      if (!newPodcastId) continue;
+      try {
+        const isDownloaded = f(ep, "isDownloaded", "is_downloaded");
+        sqlite.prepare(
+          `INSERT OR IGNORE INTO podcast_episodes (podcast_id, guid, title, description, pub_date, duration, audio_url, local_path, cover_url, cover_path, file_size, listened_at, play_position, is_downloaded, added_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(
+          newPodcastId,
+          f(ep, "guid", "guid") || null,
+          f(ep, "title", "title"),
+          f(ep, "description", "description") || null,
+          f(ep, "pubDate", "pub_date") || null,
+          f(ep, "duration", "duration") || null,
+          f(ep, "audioUrl", "audio_url"),
+          f(ep, "localPath", "local_path") || null,
+          f(ep, "coverUrl", "cover_url") || null,
+          f(ep, "coverPath", "cover_path") || null,
+          f(ep, "fileSize", "file_size") || null,
+          f(ep, "listenedAt", "listened_at") || null,
+          f(ep, "playPosition", "play_position") || 0,
+          isDownloaded ? 1 : 0,
+          f(ep, "addedAt", "added_at") || null,
+        );
+        episodesImported++;
+      } catch { /* skip */ }
+    }
+
+    const insightsData = (exportData.episodeInsights || []) as Record<string, unknown>[];
+    for (const ins of insightsData) {
+      const srcEpisodeId = (f(ins, "episodeId", "episode_id") ?? 0) as number;
+      // Episode IDs may have shifted — skip remapping for now, use direct insert
+      try {
+        sqlite.prepare(
+          `INSERT OR IGNORE INTO episode_insights (episode_id, type, content, generated_at)
+           VALUES (?, ?, ?, ?)`
+        ).run(srcEpisodeId, f(ins, "type", "type"), f(ins, "content", "content"), f(ins, "generatedAt", "generated_at") || null);
+        insightsImported++;
+      } catch { /* skip */ }
+    }
+
     return NextResponse.json({
       tracksMapped: idMap.size,
       playlistsImported,
@@ -196,6 +275,9 @@ export async function POST(request: NextRequest) {
       historyImported,
       lyricsImported,
       settingsImported,
+      podcastsImported,
+      episodesImported,
+      insightsImported,
     });
   } catch (err) {
     console.error("Import error:", err);

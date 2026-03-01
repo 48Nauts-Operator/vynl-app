@@ -7,9 +7,12 @@ import {
   listeningHistory,
   trackLyrics,
   settings,
+  podcasts,
+  podcastEpisodes,
+  episodeInsights,
 } from "@/lib/db/schema";
 
-// Export user data (playlists, ratings, history, lyrics, settings)
+// Export user data (playlists, ratings, history, lyrics, settings, podcasts)
 // This data can't be recreated by a library scan — it's user-generated
 export async function GET() {
   try {
@@ -20,6 +23,9 @@ export async function GET() {
       listeningHistory: db.select().from(listeningHistory).all(),
       trackLyrics: db.select().from(trackLyrics).all(),
       settings: db.select().from(settings).all(),
+      podcasts: db.select().from(podcasts).all(),
+      podcastEpisodes: db.select().from(podcastEpisodes).all(),
+      episodeInsights: db.select().from(episodeInsights).all(),
       exportedAt: new Date().toISOString(),
     };
 
