@@ -22,7 +22,7 @@ services:
     environment:
       - MUSIC_LIBRARY_PATH=/music/library
       - BEETS_DB_PATH=/music/library.db
-      - BEETS_PATH_REMAP=/Volumes/Music::/music;/Volumes/Music-1::/music
+      - BEETS_PATH_REMAP=/Volumes/Music::/music
       - VYNL_DB_DIR=/app/data
       - PODCAST_STORAGE_PATH=/music/podcasts
       - VYNL_HOST=http://192.168.74.190:3101
