@@ -1,17 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { tracks } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
 
-interface ImportData {
-  playlists: { id: number; name: string; description?: string; cover_path?: string; is_auto_generated?: number; created_at?: string; updated_at?: string }[];
-  playlistTracks: { playlist_id: number; track_id: number; position: number; added_at?: string }[];
-  trackRatings: { track_id: number; rating: number; rated_at?: string }[];
-  listeningHistory: { track_id?: number; track_title: string; track_artist: string; source?: string; played_at?: string; duration?: number; listened_duration?: number; output_target?: string }[];
-  trackLyrics: { track_id: number; content: string; format: string; source: string; fetched_at?: string }[];
-  settings: { key: string; value: string }[];
-  // Track ID mapping: source instance track_id → file_path
-  trackMap?: Record<string, string>;
+// Helper: access a field by camelCase or snake_case
+function f(obj: Record<string, unknown>, camel: string, snake: string): unknown {
+  return obj[camel] ?? obj[snake];
 }
 
 // Import user data from another Vynl instance
@@ -19,21 +12,22 @@ interface ImportData {
 export async function POST(request: NextRequest) {
   try {
     const sourceUrl = request.nextUrl.searchParams.get("source");
-    let data: ImportData;
+
+    let exportData: Record<string, unknown>;
+    let trackMap: Record<string, string> | undefined;
 
     if (sourceUrl) {
-      // Fetch export data from source instance
       const resp = await fetch(`${sourceUrl}/api/data/export`);
       if (!resp.ok) return NextResponse.json({ error: `Failed to fetch from ${sourceUrl}` }, { status: 502 });
-      data = await resp.json();
+      exportData = await resp.json();
 
-      // Also fetch track mapping (id → file_path) from source
       const tracksResp = await fetch(`${sourceUrl}/api/data/track-map`);
       if (tracksResp.ok) {
-        data.trackMap = await tracksResp.json();
+        trackMap = await tracksResp.json();
       }
     } else {
-      data = await request.json();
+      exportData = await request.json();
+      trackMap = exportData.trackMap as Record<string, string> | undefined;
     }
 
     const sqlite = (db as any).session?.client || (db as any).$client;
@@ -41,8 +35,7 @@ export async function POST(request: NextRequest) {
     // Build source track_id → local track_id mapping
     const idMap = new Map<number, number>();
 
-    if (data.trackMap) {
-      // Map by file_path: source track_id → file_path → local track_id
+    if (trackMap) {
       const pathRemap = process.env.BEETS_PATH_REMAP;
       const remapRules: { from: string; to: string }[] = [];
       if (pathRemap) {
@@ -52,21 +45,28 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      for (const [sourceId, sourcePath] of Object.entries(data.trackMap)) {
-        // Try to find by the path as-is, or by applying our own remap rules
-        const localTrack = db.select({ id: tracks.id }).from(tracks)
-          .where(eq(tracks.filePath, sourcePath)).get();
+      // Build a local file_path → track_id index for fast lookup
+      const allLocal = db.select({ id: tracks.id, filePath: tracks.filePath }).from(tracks).all();
+      const localByPath = new Map<string, number>();
+      for (const t of allLocal) {
+        localByPath.set(t.filePath, t.id);
+      }
 
-        if (localTrack) {
-          idMap.set(Number(sourceId), localTrack.id);
-        } else {
-          // Try all remap rules to find a match
-          for (const rule of remapRules) {
-            const testPath = sourcePath.replace(rule.from, rule.to);
-            const match = db.select({ id: tracks.id }).from(tracks)
-              .where(eq(tracks.filePath, testPath)).get();
+      for (const [sourceId, sourcePath] of Object.entries(trackMap)) {
+        // Direct match
+        const directMatch = localByPath.get(sourcePath);
+        if (directMatch) {
+          idMap.set(Number(sourceId), directMatch);
+          continue;
+        }
+
+        // Try remap rules (source paths use different prefixes)
+        for (const rule of remapRules) {
+          if (sourcePath.startsWith(rule.from + "/")) {
+            const testPath = rule.to + sourcePath.slice(rule.from.length);
+            const match = localByPath.get(testPath);
             if (match) {
-              idMap.set(Number(sourceId), match.id);
+              idMap.set(Number(sourceId), match);
               break;
             }
           }
@@ -80,81 +80,109 @@ export async function POST(request: NextRequest) {
     let lyricsImported = 0;
     let settingsImported = 0;
 
-    // Import playlists with track remapping
+    // Import playlists (handle both camelCase and snake_case keys)
     const playlistIdMap = new Map<number, number>();
-    for (const pl of data.playlists || []) {
+    const playlists = (exportData.playlists || []) as Record<string, unknown>[];
+    for (const pl of playlists) {
+      const srcId = f(pl, "id", "id") as number;
       const result = sqlite.prepare(
         `INSERT OR IGNORE INTO playlists (name, description, cover_path, is_auto_generated, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?)`
-      ).run(pl.name, pl.description || null, pl.cover_path || null, pl.is_auto_generated || 0, pl.created_at || null, pl.updated_at || null);
+      ).run(
+        f(pl, "name", "name"),
+        f(pl, "description", "description") || null,
+        f(pl, "coverPath", "cover_path") || null,
+        f(pl, "isAutoGenerated", "is_auto_generated") || 0,
+        f(pl, "createdAt", "created_at") || null,
+        f(pl, "updatedAt", "updated_at") || null,
+      );
 
       if (result.changes > 0) {
-        playlistIdMap.set(pl.id, result.lastInsertRowid as number);
+        playlistIdMap.set(srcId, result.lastInsertRowid as number);
         playlistsImported++;
       }
     }
 
-    // Import playlist tracks (remap both playlist_id and track_id)
+    // Import playlist tracks
     let playlistTracksImported = 0;
-    for (const pt of data.playlistTracks || []) {
-      const newPlaylistId = playlistIdMap.get(pt.playlist_id);
-      const newTrackId = idMap.get(pt.track_id);
+    const pTracks = (exportData.playlistTracks || []) as Record<string, unknown>[];
+    for (const pt of pTracks) {
+      const srcPlaylistId = (f(pt, "playlistId", "playlist_id") ?? 0) as number;
+      const srcTrackId = (f(pt, "trackId", "track_id") ?? 0) as number;
+      const newPlaylistId = playlistIdMap.get(srcPlaylistId);
+      const newTrackId = idMap.get(srcTrackId);
       if (newPlaylistId && newTrackId) {
         try {
           sqlite.prepare(
             `INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position, added_at)
              VALUES (?, ?, ?, ?)`
-          ).run(newPlaylistId, newTrackId, pt.position, pt.added_at || null);
+          ).run(newPlaylistId, newTrackId, f(pt, "position", "position"), f(pt, "addedAt", "added_at") || null);
           playlistTracksImported++;
         } catch { /* skip duplicates */ }
       }
     }
 
     // Import track ratings
-    for (const tr of data.trackRatings || []) {
-      const newTrackId = idMap.get(tr.track_id);
+    const ratings = (exportData.trackRatings || []) as Record<string, unknown>[];
+    for (const tr of ratings) {
+      const srcTrackId = (f(tr, "trackId", "track_id") ?? 0) as number;
+      const newTrackId = idMap.get(srcTrackId);
       if (newTrackId) {
         try {
           sqlite.prepare(
             `INSERT OR REPLACE INTO track_ratings (track_id, rating, rated_at) VALUES (?, ?, ?)`
-          ).run(newTrackId, tr.rating, tr.rated_at || null);
+          ).run(newTrackId, f(tr, "rating", "rating"), f(tr, "ratedAt", "rated_at") || null);
           ratingsImported++;
         } catch { /* skip */ }
       }
     }
 
-    // Import listening history (no track_id remapping needed — uses title/artist)
-    for (const lh of data.listeningHistory || []) {
-      const newTrackId = lh.track_id ? idMap.get(lh.track_id) : null;
+    // Import listening history
+    const history = (exportData.listeningHistory || []) as Record<string, unknown>[];
+    for (const lh of history) {
+      const srcTrackId = f(lh, "trackId", "track_id") as number | undefined;
+      const newTrackId = srcTrackId ? idMap.get(srcTrackId) : null;
       try {
         sqlite.prepare(
           `INSERT INTO listening_history (track_id, track_title, track_artist, source, played_at, duration, listened_duration, output_target)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-        ).run(newTrackId || null, lh.track_title, lh.track_artist, lh.source || "local", lh.played_at || null, lh.duration || null, lh.listened_duration || null, lh.output_target || "browser");
+        ).run(
+          newTrackId || null,
+          f(lh, "trackTitle", "track_title"),
+          f(lh, "trackArtist", "track_artist"),
+          f(lh, "source", "source") || "local",
+          f(lh, "playedAt", "played_at") || null,
+          f(lh, "duration", "duration") || null,
+          f(lh, "listenedDuration", "listened_duration") || null,
+          f(lh, "outputTarget", "output_target") || "browser",
+        );
         historyImported++;
       } catch { /* skip */ }
     }
 
     // Import lyrics
-    for (const tl of data.trackLyrics || []) {
-      const newTrackId = idMap.get(tl.track_id);
+    const lyrics = (exportData.trackLyrics || []) as Record<string, unknown>[];
+    for (const tl of lyrics) {
+      const srcTrackId = (f(tl, "trackId", "track_id") ?? 0) as number;
+      const newTrackId = idMap.get(srcTrackId);
       if (newTrackId) {
         try {
           sqlite.prepare(
             `INSERT OR REPLACE INTO track_lyrics (track_id, content, format, source, fetched_at)
              VALUES (?, ?, ?, ?, ?)`
-          ).run(newTrackId, tl.content, tl.format, tl.source, tl.fetched_at || null);
+          ).run(newTrackId, f(tl, "content", "content"), f(tl, "format", "format"), f(tl, "source", "source"), f(tl, "fetchedAt", "fetched_at") || null);
           lyricsImported++;
         } catch { /* skip */ }
       }
     }
 
     // Import settings
-    for (const s of data.settings || []) {
+    const settingsData = (exportData.settings || []) as Record<string, unknown>[];
+    for (const s of settingsData) {
       try {
         sqlite.prepare(
           `INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`
-        ).run(s.key, s.value);
+        ).run(f(s, "key", "key"), f(s, "value", "value"));
         settingsImported++;
       } catch { /* skip */ }
     }
