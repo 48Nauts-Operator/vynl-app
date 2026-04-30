@@ -44,9 +44,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # included in the Docker image yet. This is planned for a future release.
 # For now, podcast AI features require a native install.
 
-# Create non-root user
+# Create non-root user with a real home directory so beets/confuse can
+# resolve $HOME/.config/beets instead of falling back to /nonexistent.
 RUN addgroup --system --gid 1001 vynl \
-    && adduser --system --uid 1001 vynl
+    && adduser --system --uid 1001 --home /home/vynl --shell /bin/bash --ingroup vynl vynl \
+    && mkdir -p /home/vynl/.config/beets \
+    && chown -R vynl:vynl /home/vynl
+
+ENV HOME=/home/vynl
 
 # Copy standalone build output
 COPY --from=builder /app/.next/standalone ./

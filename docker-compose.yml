@@ -17,12 +17,15 @@ services:
       - ${MUSIC_LIBRARY_PATH:-/mnt/music}/library.db:/music/library.db
       # Podcast storage
       - ${MUSIC_LIBRARY_PATH:-/mnt/music}/podcasts:/music/podcasts
-      # Persistent app data (SQLite DB, covers cache)
+      # Persistent app data (SQLite DB, covers cache, artist images)
       - vynl-data:/app/data
       - vynl-covers:/app/public/covers
+      - vynl-artists:/app/public/artists
       # Beets config (optional — mount your existing config)
       - ${BEETS_CONFIG:-./beets-config.yaml}:/home/vynl/.config/beets/config.yaml:ro
     environment:
+      - HOME=/home/vynl
+      - BEETSDIR=/home/vynl/.config/beets
       - MUSIC_LIBRARY_PATH=/music/library
       - BEETS_DB_PATH=/music/library.db
       - BEETS_PATH_REMAP=/Volumes/Music::/music;/Volumes/Music-1::/music
@@ -37,3 +40,4 @@ services:
 volumes:
   vynl-data:
   vynl-covers:
+  vynl-artists:
