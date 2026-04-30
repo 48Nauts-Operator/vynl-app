@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Project documentation
+    url: https://github.com/48Nauts-Operator/vynl-app/tree/main/docs
+    about: Browse feature specs and research notes before filing.

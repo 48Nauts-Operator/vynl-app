@@ -1,0 +1,22 @@
+name: TODO to Issue
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: alstr/todo-to-issue-action@v5
+        with:
+          IDENTIFIERS: '[{"name": "TODO", "labels": ["todo"]}, {"name": "FIXME", "labels": ["bug", "fixme"]}, {"name": "HACK", "labels": ["tech-debt"]}]'
+          AUTO_ASSIGN: true
+          INSERT_ISSUE_URLS: true

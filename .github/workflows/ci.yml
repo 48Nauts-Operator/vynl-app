@@ -1,0 +1,14 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    uses: 48Nauts-Operator/ci-workflows/.github/workflows/node-ci.yml@main
+    with:
+      package-manager: npm
+      run-typecheck: true
+      build: true
