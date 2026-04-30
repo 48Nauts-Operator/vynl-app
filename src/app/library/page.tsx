@@ -57,6 +57,29 @@ function stripAnsi(str: string): string {
   return str.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "").replace(/\[[\d;]*m/g, "");
 }
 
+// Clipboard fallback for non-HTTPS contexts (e.g. LAN IP access)
+function copyToClipboard(text: string): boolean {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).catch(() => {});
+    return true;
+  }
+  // Fallback: hidden textarea + execCommand
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand("copy");
+    return true;
+  } catch {
+    return false;
+  } finally {
+    document.body.removeChild(ta);
+  }
+}
+
 // ---- Import Tab ----
 interface BatchFolderResult {
   folder: string;
@@ -470,7 +493,7 @@ function ImportTab() {
                     {batchLogs.length > 0 && (
                       <button
                         onClick={() => {
-                          navigator.clipboard.writeText(batchLogs.join("\n"));
+                          copyToClipboard(batchLogs.join("\n"));
                           setCopiedLogs(true);
                           setTimeout(() => setCopiedLogs(false), 1500);
                         }}
@@ -753,47 +776,191 @@ function DuplicatesTab() {
 }
 
 // ---- Housekeeping Tab ----
-function HousekeepingTab() {
-  const [running, setRunning] = useState<string | null>(null);
-  const [results, setResults] = useState<Record<string, any>>({});
 
-  const runAction = async (action: string) => {
-    setRunning(action);
+interface HousekeepingActionState {
+  running: boolean;
+  logs: string[];
+  logOffset: number;
+  showLogs: boolean;
+  total: number;
+  current: number;
+  status: "idle" | "running" | "complete" | "error" | "cancelled";
+  result?: Record<string, unknown>;
+  copiedLogs: boolean;
+}
+
+const HOUSEKEEPING_ACTIONS = [
+  {
+    id: "clean-missing",
+    label: "Clean Missing Files",
+    desc: "Remove database entries for files that no longer exist on disk.",
+    icon: Trash2,
+  },
+  {
+    id: "refresh-metadata",
+    label: "Refresh Metadata",
+    desc: "Re-read tags from all audio files and update the database.",
+    icon: RefreshCw,
+  },
+  {
+    id: "fetch-artwork",
+    label: "Fetch Artwork",
+    desc: "Search iTunes and extract embedded art for albums missing covers.",
+    icon: ImageIcon,
+  },
+];
+
+function HousekeepingTab() {
+  const [actionStates, setActionStates] = useState<Record<string, HousekeepingActionState>>({});
+  const [activeAction, setActiveAction] = useState<string | null>(null);
+  const logEndRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
+
+  const getState = (id: string): HousekeepingActionState =>
+    actionStates[id] || {
+      running: false,
+      logs: [],
+      logOffset: 0,
+      showLogs: true,
+      total: 0,
+      current: 0,
+      status: "idle",
+      copiedLogs: false,
+    };
+
+  const updateState = (id: string, update: Partial<HousekeepingActionState>) => {
+    setActionStates((prev) => ({
+      ...prev,
+      [id]: { ...getState(id), ...prev[id], ...update },
+    }));
+  };
+
+  // Auto-scroll logs to bottom
+  useEffect(() => {
+    if (activeAction) {
+      const ref = logEndRefs.current[activeAction];
+      if (ref) ref.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [actionStates, activeAction]);
+
+  // Poll for active job status
+  useEffect(() => {
+    if (!activeAction) return;
+    let currentOffset = getState(activeAction).logOffset;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/library/housekeeping/job?since=${currentOffset}`);
+        const data = await res.json();
+        if (data.status === "idle") return;
+
+        // Check this poll is still for the active action
+        if (data.action !== activeAction) return;
+
+        const newLogs = data.logs || [];
+        if (newLogs.length > 0) {
+          setActionStates((prev) => {
+            const s = prev[activeAction] || getState(activeAction);
+            return {
+              ...prev,
+              [activeAction]: {
+                ...s,
+                logs: [...s.logs, ...newLogs],
+                logOffset: data.totalLogs,
+                total: data.total || 0,
+                current: data.current || 0,
+                status: data.status,
+                result: data.result,
+              },
+            };
+          });
+          currentOffset = data.totalLogs;
+        } else {
+          updateState(activeAction, {
+            total: data.total || 0,
+            current: data.current || 0,
+            status: data.status,
+            result: data.result,
+          });
+        }
+
+        if (data.status === "complete" || data.status === "error" || data.status === "cancelled") {
+          setActiveAction(null);
+          updateState(data.action, { running: false, status: data.status, result: data.result });
+        }
+      } catch {
+        // Poll error, will retry
+      }
+    }, 1500);
+    return () => clearInterval(interval);
+  }, [activeAction]);
+
+  // On mount, check if a housekeeping job is already running
+  useEffect(() => {
+    fetch("/api/library/housekeeping/job?since=0")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.status === "running") {
+          setActiveAction(data.action);
+          updateState(data.action, {
+            running: true,
+            logs: data.logs || [],
+            logOffset: data.totalLogs || 0,
+            total: data.total || 0,
+            current: data.current || 0,
+            status: "running",
+            showLogs: true,
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const startAction = async (actionId: string) => {
+    // Reset state for this action
+    updateState(actionId, {
+      running: true,
+      logs: [],
+      logOffset: 0,
+      showLogs: true,
+      total: 0,
+      current: 0,
+      status: "running",
+      result: undefined,
+      copiedLogs: false,
+    });
+    setActiveAction(actionId);
+
     try {
-      const res = await fetch("/api/library/housekeeping", {
+      const res = await fetch("/api/library/housekeeping/job", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action: actionId }),
       });
-      const data = await res.json();
-      setResults((prev) => ({ ...prev, [action]: data }));
+      if (!res.ok) {
+        const data = await res.json();
+        updateState(actionId, { running: false, status: "error", logs: [`Error: ${data.error}`] });
+        setActiveAction(null);
+      }
     } catch (err) {
-      setResults((prev) => ({ ...prev, [action]: { error: String(err) } }));
-    } finally {
-      setRunning(null);
+      updateState(actionId, { running: false, status: "error", logs: [`Error: ${err}`] });
+      setActiveAction(null);
     }
   };
 
-  const actions = [
-    {
-      id: "clean-missing",
-      label: "Clean Missing Files",
-      desc: "Remove database entries for files that no longer exist on disk.",
-      icon: Trash2,
-    },
-    {
-      id: "refresh-metadata",
-      label: "Refresh Metadata",
-      desc: "Re-read tags from all audio files and update the database.",
-      icon: RefreshCw,
-    },
-    {
-      id: "fetch-artwork",
-      label: "Fetch Artwork",
-      desc: "Download missing album art using Beets (requires Beets).",
-      icon: ImageIcon,
-    },
-  ];
+  const cancelAction = async () => {
+    try {
+      await fetch("/api/library/housekeeping/job", { method: "DELETE" });
+    } catch {
+      // Best effort
+    }
+  };
+
+  const copyLogs = (actionId: string) => {
+    const s = getState(actionId);
+    copyToClipboard(s.logs.join("\n"));
+    updateState(actionId, { copiedLogs: true });
+    setTimeout(() => updateState(actionId, { copiedLogs: false }), 1500);
+  };
 
   return (
     <Card>
@@ -801,45 +968,146 @@ function HousekeepingTab() {
         <div>
           <h3 className="text-lg font-semibold mb-1">Housekeeping</h3>
           <p className="text-sm text-muted-foreground">
-            Maintain your library by cleaning up stale entries and refreshing metadata.
+            Maintain your library by cleaning up stale entries, refreshing metadata, and fetching missing artwork.
           </p>
         </div>
-        <div className="grid gap-3">
-          {actions.map((action) => (
-            <div
-              key={action.id}
-              className="flex items-center justify-between p-4 rounded-lg border border-border bg-secondary/10"
-            >
-              <div className="flex items-center gap-3">
-                <action.icon className="h-5 w-5 text-muted-foreground" />
-                <div>
-                  <p className="text-sm font-medium">{action.label}</p>
-                  <p className="text-xs text-muted-foreground">{action.desc}</p>
+        <div className="grid gap-4">
+          {HOUSEKEEPING_ACTIONS.map((action) => {
+            const s = getState(action.id);
+            const isRunning = s.running && activeAction === action.id;
+            const progress = s.total > 0 ? Math.round((s.current / s.total) * 100) : 0;
+            const isDone = s.status === "complete" || s.status === "error" || s.status === "cancelled";
+
+            return (
+              <div key={action.id} className="rounded-lg border border-border bg-secondary/10 overflow-hidden">
+                {/* Action header */}
+                <div className="flex items-center justify-between p-4">
+                  <div className="flex items-center gap-3">
+                    <action.icon className="h-5 w-5 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium">{action.label}</p>
+                      <p className="text-xs text-muted-foreground">{action.desc}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {isRunning && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={cancelAction}
+                        className="h-7 px-2 text-red-400 hover:text-red-300 hover:bg-red-950/30"
+                      >
+                        <Ban className="h-3.5 w-3.5 mr-1" />
+                        Cancel
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => startAction(action.id)}
+                      disabled={activeAction !== null}
+                    >
+                      {isRunning ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        "Run"
+                      )}
+                    </Button>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-3">
-                {results[action.id] && (
-                  <span className="text-xs text-muted-foreground">
-                    {results[action.id].error
-                      ? "Error"
-                      : results[action.id].message}
-                  </span>
+
+                {/* Progress bar */}
+                {(isRunning || isDone) && s.total > 0 && (
+                  <div className="px-4 pb-2 space-y-1">
+                    <Progress value={progress} className="h-2" />
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>{s.current} / {s.total}</span>
+                      <span>{progress}%</span>
+                    </div>
+                  </div>
                 )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => runAction(action.id)}
-                  disabled={running !== null}
-                >
-                  {running === action.id ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    "Run"
-                  )}
-                </Button>
+
+                {/* Log panel */}
+                {(s.logs.length > 0 || isRunning) && (
+                  <div className="border-t border-border px-4 py-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <button
+                        onClick={() => updateState(action.id, { showLogs: !s.showLogs })}
+                        className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                      >
+                        <span className={`transition-transform inline-block ${s.showLogs ? "rotate-90" : ""}`}>▶</span>
+                        Live Output ({s.logs.length} lines)
+                      </button>
+                      <div className="flex items-center gap-2">
+                        {s.logs.length > 0 && (
+                          <button
+                            onClick={() => copyLogs(action.id)}
+                            className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                            title="Copy logs to clipboard"
+                          >
+                            {s.copiedLogs ? (
+                              <CheckCircle2 className="h-3.5 w-3.5 text-green-400" />
+                            ) : (
+                              <ClipboardCopy className="h-3.5 w-3.5" />
+                            )}
+                            {s.copiedLogs ? "Copied" : "Copy"}
+                          </button>
+                        )}
+                        {isRunning && (
+                          <span className="flex items-center gap-1 text-xs text-green-400">
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                            live
+                          </span>
+                        )}
+                        {isDone && (
+                          <Badge variant={s.status === "complete" ? "default" : s.status === "cancelled" ? "secondary" : "destructive"} className="text-xs">
+                            {s.status === "complete" ? "Done" : s.status === "cancelled" ? "Cancelled" : "Error"}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                    {s.showLogs && (
+                      <div className="bg-black/40 rounded-lg p-3 max-h-72 overflow-y-auto font-mono text-xs leading-relaxed">
+                        {s.logs.map((line, i) => (
+                          <div
+                            key={i}
+                            className={
+                              line.includes("\u2717") || line.includes("\u26a0")
+                                ? "text-red-400/80"
+                                : line.includes("\u2713")
+                                ? "text-green-400/80"
+                                : line.includes("\u2501\u2501\u2501")
+                                ? "text-foreground font-semibold"
+                                : line.includes("\u2192")
+                                ? "text-blue-400/70"
+                                : "text-muted-foreground"
+                            }
+                          >
+                            {line}
+                          </div>
+                        ))}
+                        <div ref={(el) => { logEndRefs.current[action.id] = el; }} />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Result summary */}
+                {isDone && s.result && (
+                  <div className="border-t border-border px-4 py-3">
+                    <div className="flex gap-4 text-xs text-muted-foreground flex-wrap">
+                      {Object.entries(s.result).map(([key, val]) => (
+                        <span key={key}>
+                          <span className="capitalize">{key.replace(/([A-Z])/g, " $1").trim()}:</span>{" "}
+                          <span className="font-medium text-foreground">{String(val)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </CardContent>
     </Card>

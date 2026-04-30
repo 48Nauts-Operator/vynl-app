@@ -305,6 +305,21 @@ sqlite.exec(`
     auto_delete_on_success INTEGER DEFAULT 1,
     updated_at TEXT DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS artist_intel (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    artist_name TEXT NOT NULL UNIQUE,
+    summary TEXT,
+    born_date TEXT,
+    born_place TEXT,
+    genres TEXT,
+    active_years TEXT,
+    image_url TEXT,
+    chart_hits TEXT,
+    musicbrainz_id TEXT,
+    wikipedia_url TEXT,
+    fetched_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 // Migrations — add columns that may not exist in older databases
@@ -323,6 +338,11 @@ try {
 } catch {
   // Index already exists
 }
+
+// Add certifications column to artist_intel
+try { sqlite.prepare(`ALTER TABLE artist_intel ADD COLUMN certifications TEXT`).run(); } catch { /* already exists */ }
+// Add local_image_path column to artist_intel
+try { sqlite.prepare(`ALTER TABLE artist_intel ADD COLUMN local_image_path TEXT`).run(); } catch { /* already exists */ }
 
 // Add popularity column to spotify_tracks
 try { sqlite.prepare(`ALTER TABLE spotify_tracks ADD COLUMN popularity INTEGER`).run(); } catch { /* already exists */ }

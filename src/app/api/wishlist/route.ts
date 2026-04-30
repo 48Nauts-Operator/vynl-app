@@ -18,6 +18,31 @@ function ensurePopularity() {
   } catch { /* table might not have column yet on first load */ }
 }
 
+/** POST — create a new wishlist item (e.g. from Shazam recognition) */
+export async function POST(request: NextRequest) {
+  const body = await request.json();
+  const { type, seedTitle, seedArtist, seedAlbum, coverUrl, status } = body;
+
+  if (!seedTitle || !seedArtist) {
+    return NextResponse.json({ error: "seedTitle and seedArtist required" }, { status: 400 });
+  }
+
+  const item = db
+    .insert(wishList)
+    .values({
+      type: type || "shazam_recognition",
+      seedTitle,
+      seedArtist,
+      seedAlbum: seedAlbum || null,
+      coverUrl: coverUrl || null,
+      status: status || "pending",
+    })
+    .returning()
+    .get();
+
+  return NextResponse.json(item, { status: 201 });
+}
+
 /** GET — list wishlist items with optional status filter */
 export async function GET(request: NextRequest) {
   ensurePopularity();

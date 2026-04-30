@@ -25,6 +25,7 @@ import { Disc3, Play, Loader2, ImageIcon, Pencil, LayoutGrid, List, Archive, Lis
 import { motion } from "framer-motion";
 import { CoverSearchDialog } from "@/components/albums/CoverSearchDialog";
 import { AddToPlaylistDialog } from "@/components/playlists/AddToPlaylistDialog";
+import { AlphabetSidebar } from "@/components/albums/AlphabetSidebar";
 
 interface Album {
   album: string;
@@ -55,7 +56,31 @@ export default function AlbumsPage() {
   const [archiveLoading, setArchiveLoading] = useState(false);
   const [playlistTrackIds, setPlaylistTrackIds] = useState<number[]>([]);
   const [showPlaylistDialog, setShowPlaylistDialog] = useState(false);
+  const [activeLetter, setActiveLetter] = useState<string | undefined>();
   const { setQueue } = usePlayerStore();
+
+  const showSidebar = sort === "artist" || sort === "name";
+
+  const getLetterForAlbum = (album: Album): string => {
+    const first = (album.album || "").charAt(0).toUpperCase();
+    return /[A-Z]/.test(first) ? first : "#";
+  };
+
+  // Filter albums by selected letter
+  const filteredAlbums = activeLetter
+    ? albums.filter((a) => getLetterForAlbum(a) === activeLetter)
+    : albums;
+
+  const handleLetterSelect = (letter: string) => {
+    setActiveLetter(letter || undefined);
+    // Scroll to top when filtering
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  // Clear letter filter when sort changes
+  useEffect(() => {
+    setActiveLetter(undefined);
+  }, [sort]);
 
   useEffect(() => {
     async function load() {
@@ -180,7 +205,11 @@ export default function AlbumsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Albums</h1>
-          <p className="text-muted-foreground mt-1">{albums.length} albums</p>
+          <p className="text-muted-foreground mt-1">
+            {activeLetter
+              ? `${filteredAlbums.length} of ${albums.length} albums — "${activeLetter}"`
+              : `${albums.length} albums`}
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <div className="relative">
@@ -252,8 +281,9 @@ export default function AlbumsPage() {
       )}
 
       {!loading && viewMode === "grid" && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-            {albums.map((album, i) => (
+        <div className="flex gap-1">
+          <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+            {filteredAlbums.map((album, i) => (
               <motion.div
                 key={`${album.album_artist}-${album.album}`}
                 initial={{ opacity: 0, y: 20 }}
@@ -308,11 +338,21 @@ export default function AlbumsPage() {
               </motion.div>
             ))}
           </div>
+          {showSidebar && albums.length > 0 && (
+            <AlphabetSidebar
+              albums={albums}
+              sortField="album"
+              onLetterSelect={handleLetterSelect}
+              activeLetter={activeLetter}
+            />
+          )}
+        </div>
       )}
 
       {!loading && viewMode === "list" && (
-          <div className="space-y-1">
-            {albums.map((album, i) => (
+        <div className="flex gap-1">
+          <div className="flex-1 space-y-1">
+            {filteredAlbums.map((album, i) => (
               <motion.div
                 key={`${album.album_artist}-${album.album}`}
                 initial={{ opacity: 0, x: -10 }}
@@ -367,6 +407,15 @@ export default function AlbumsPage() {
               </motion.div>
             ))}
           </div>
+          {showSidebar && albums.length > 0 && (
+            <AlphabetSidebar
+              albums={albums}
+              sortField="album"
+              onLetterSelect={handleLetterSelect}
+              activeLetter={activeLetter}
+            />
+          )}
+        </div>
       )}
 
       {/* Custom context menu */}
@@ -432,12 +481,20 @@ export default function AlbumsPage() {
         </div>
       )}
 
-      {!loading && albums.length === 0 && (
+      {!loading && filteredAlbums.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16">
           <Disc3 className="h-16 w-16 text-muted-foreground mb-4" />
-          <p className="text-lg text-muted-foreground">No albums found</p>
+          <p className="text-lg text-muted-foreground">
+            {activeLetter ? `No albums starting with "${activeLetter}"` : "No albums found"}
+          </p>
           <p className="text-sm text-muted-foreground mt-1">
-            Scan your music library to get started
+            {activeLetter ? (
+              <button onClick={() => setActiveLetter(undefined)} className="text-primary hover:underline">
+                Clear filter
+              </button>
+            ) : (
+              "Scan your music library to get started"
+            )}
           </p>
         </div>
       )}

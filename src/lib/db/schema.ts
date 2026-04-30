@@ -378,3 +378,31 @@ export const watcherConfig = sqliteTable("watcher_config", {
 });
 
 export type WatcherConfig = typeof watcherConfig.$inferSelect;
+
+// ---------- Artist Intelligence ----------
+
+export const artistIntel = sqliteTable("artist_intel", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  artistName: text("artist_name").notNull().unique(),
+
+  // Bio
+  summary: text("summary"),               // 2-3 paragraph bio
+  bornDate: text("born_date"),            // birth date or formation date
+  bornPlace: text("born_place"),          // birthplace or origin city
+  genres: text("genres"),                  // JSON array of genres
+  activeYears: text("active_years"),       // e.g. "1985–present"
+  imageUrl: text("image_url"),             // Wikipedia/MusicBrainz image URL
+  localImagePath: text("local_image_path"), // Downloaded artist image path (public/artists/...)
+
+  // Chart hits
+  chartHits: text("chart_hits"),           // JSON array: [{ title, year, peak, weeks, chart, certification }]
+  certifications: text("certifications"),   // JSON array: [{ title, type, count, country }]
+
+  // Source metadata
+  musicbrainzId: text("musicbrainz_id"),
+  wikipediaUrl: text("wikipedia_url"),
+  fetchedAt: text("fetched_at").default(sql`(datetime('now'))`),
+});
+
+export type ArtistIntel = typeof artistIntel.$inferSelect;
+export type NewArtistIntel = typeof artistIntel.$inferInsert;
