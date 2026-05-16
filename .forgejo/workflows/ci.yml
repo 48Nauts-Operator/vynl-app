@@ -1,7 +1,7 @@
 name: CI
 on:
   push:
-    branches: [development, production]
+    branches: [development, UAT]
   pull_request:
 
 jobs:
