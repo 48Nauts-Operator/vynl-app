@@ -61,21 +61,78 @@ jobs:
           git tag -a "${TAG}" -m "Release ${VERSION}"
           git push github "${TAG}"
 
-      - name: Create GitHub release (auto-generated notes)
+      - name: Create / update GitHub release + attach assets
         env:
           GITHUB_PAT: ${{ secrets.SYNC_PAT }}
           TAG: ${{ steps.ver.outputs.tag }}
         run: |
-          # Skip if release already exists (idempotent)
-          status=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer ${GITHUB_PAT}" \
-            "https://api.github.com/repos/48Nauts-Operator/vynl-app/releases/tags/${TAG}")
-          if [ "$status" = "200" ]; then
-            echo "Release ${TAG} already exists — skipping"
-            exit 0
+          API="https://api.github.com/repos/48Nauts-Operator/vynl-app"
+          UPLOADS="https://uploads.github.com/repos/48Nauts-Operator/vynl-app"
+          AUTH=(-H "Authorization: Bearer ${GITHUB_PAT}" -H "Accept: application/vnd.github+json")
+
+          # Find previous tag for the changelog range
+          PREV_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..${TAG}"
+            COMPARE="https://github.com/48Nauts-Operator/vynl-app/compare/${PREV_TAG}...${TAG}"
+          else
+            RANGE="${TAG}"
+            COMPARE=""
           fi
-          curl -fsS -X POST \
-            -H "Authorization: Bearer ${GITHUB_PAT}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/48Nauts-Operator/vynl-app/releases" \
-            -d "{\"tag_name\":\"${TAG}\",\"name\":\"Vynl ${TAG}\",\"generate_release_notes\":true}"
+
+          # Build changelog body grouped by conventional-commit prefix.
+          # Excludes merges and the empty trigger commits we use on UAT.
+          format_section() {
+            local heading="$1" pattern="$2" lines
+            lines=$(git log --no-merges --pretty=format:"%s" $RANGE \
+              | grep -E "$pattern" \
+              | grep -v -i "empty commit to trigger\|retrigger release" \
+              | sed -E 's/^([a-z]+)(\([^)]+\))?: /- /' || true)
+            if [ -n "$lines" ]; then printf '### %s\n%s\n\n' "$heading" "$lines"; fi
+          }
+          {
+            echo "## What's in ${TAG}"
+            echo
+            format_section "Features"      "^feat(\([^)]+\))?:"
+            format_section "Fixes"         "^fix(\([^)]+\))?:"
+            format_section "Performance"   "^perf(\([^)]+\))?:"
+            format_section "Refactor"      "^refactor(\([^)]+\))?:"
+            format_section "Documentation" "^docs(\([^)]+\))?:"
+            format_section "Build & CI"    "^(chore|build|ci)(\([^)]+\))?:"
+            [ -n "$COMPARE" ] && echo "**Full Changelog**: ${COMPARE}"
+          } > /tmp/release-body.md
+          BODY=$(jq -Rs . < /tmp/release-body.md)
+
+          # Create or update the release; capture the id
+          REL=$(curl -sS "${AUTH[@]}" "${API}/releases/tags/${TAG}")
+          RELEASE_ID=$(echo "$REL" | jq -r '.id // empty')
+          if [ -z "$RELEASE_ID" ]; then
+            REL=$(curl -fsS -X POST "${AUTH[@]}" "${API}/releases" \
+              -d "{\"tag_name\":\"${TAG}\",\"name\":\"Vynl ${TAG}\",\"body\":${BODY}}")
+            RELEASE_ID=$(echo "$REL" | jq -r '.id')
+            echo "Created release ${TAG} (id=${RELEASE_ID})"
+          else
+            curl -fsS -X PATCH "${AUTH[@]}" "${API}/releases/${RELEASE_ID}" \
+              -d "{\"body\":${BODY}}" > /dev/null
+            echo "Updated release ${TAG} (id=${RELEASE_ID})"
+          fi
+
+          # Attach downloadable assets. Skipped if same-name asset already
+          # exists (GitHub disallows duplicate asset names per release).
+          EXISTING=$(echo "$REL" | jq -r '.assets[]?.name // empty')
+          for asset in docker-compose.yml portainer-stack.yml; do
+            if echo "$EXISTING" | grep -qx "$asset"; then
+              echo "Asset ${asset} already attached — skipping"
+              continue
+            fi
+            if [ ! -f "$asset" ]; then
+              echo "::warning::${asset} not found in repo — skipping"
+              continue
+            fi
+            echo "Uploading ${asset}..."
+            curl -fsS -X POST "${AUTH[@]}" \
+              -H "Content-Type: application/x-yaml" \
+              --data-binary @"$asset" \
+              "${UPLOADS}/releases/${RELEASE_ID}/assets?name=${asset}" \
+              | jq -r '"  ✓ \(.name) (\(.size) bytes)"'
+          done

@@ -39,6 +39,11 @@ services:
       # discovery returns nothing (e.g. multicast blocked between VLANs).
       # The rest of the household is discovered via topology from this seed.
       - SONOS_SEED_IP=${SONOS_SEED_IP:-}
+      # Optional. GitHub PAT for the /github-stats page. Without it the page
+      # still shows stars + release downloads, but the Traffic panel
+      # (views/clones) stays hidden. PAT needs Metadata: read AND
+      # Administration: read on 48Nauts-Operator/vynl-app.
+      - GH_STATS_PAT=${GH_STATS_PAT:-}
 
 volumes:
   vynl-data:
