@@ -1,0 +1,81 @@
+name: Release to GitHub
+
+# Mirrors UAT (Forgejo's local-prod gate) to GitHub `main`, which triggers
+# the GitHub Action that builds and publishes the Docker image to GHCR.
+# Also creates a GitHub release tag named after the version in package.json.
+#
+# Required Forgejo Actions secrets:
+#   GITHUB_SYNC_PAT — GitHub PAT with `contents: write` scope on
+#                     48Nauts-Operator/vynl-app. Used to push commits +
+#                     tags and create releases.
+
+on:
+  push:
+    branches: [UAT]
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Read version from package.json
+        id: ver
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Configure git identity
+        run: |
+          git config user.name "vynl-release-bot"
+          git config user.email "release-bot@48nauts.com"
+
+      - name: Add GitHub remote and push to main
+        env:
+          GITHUB_PAT: ${{ secrets.GITHUB_SYNC_PAT }}
+        run: |
+          if [ -z "$GITHUB_PAT" ]; then
+            echo "::error::GITHUB_SYNC_PAT secret is not set in Forgejo Actions"
+            exit 1
+          fi
+          git remote add github "https://x-access-token:${GITHUB_PAT}@github.com/48Nauts-Operator/vynl-app.git"
+          echo "Pushing $(git rev-parse HEAD) to GitHub main..."
+          git push github HEAD:main
+
+      - name: Create release tag (if new version)
+        env:
+          GITHUB_PAT: ${{ secrets.GITHUB_SYNC_PAT }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          if git ls-remote --tags github | grep -q "refs/tags/${TAG}$"; then
+            echo "Tag ${TAG} already exists on GitHub — skipping tag + release"
+            exit 0
+          fi
+          git tag -a "${TAG}" -m "Release ${VERSION}"
+          git push github "${TAG}"
+
+      - name: Create GitHub release (auto-generated notes)
+        env:
+          GITHUB_PAT: ${{ secrets.GITHUB_SYNC_PAT }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          # Skip if release already exists (idempotent)
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${GITHUB_PAT}" \
+            "https://api.github.com/repos/48Nauts-Operator/vynl-app/releases/tags/${TAG}")
+          if [ "$status" = "200" ]; then
+            echo "Release ${TAG} already exists — skipping"
+            exit 0
+          fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${GITHUB_PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/48Nauts-Operator/vynl-app/releases" \
+            -d "{\"tag_name\":\"${TAG}\",\"name\":\"Vynl ${TAG}\",\"generate_release_notes\":true}"
