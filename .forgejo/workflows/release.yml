@@ -5,7 +5,7 @@ name: Release to GitHub
 # Also creates a GitHub release tag named after the version in package.json.
 #
 # Required Forgejo Actions secrets:
-#   GITHUB_SYNC_PAT — GitHub PAT with `contents: write` scope on
+#   SYNC_PAT — GitHub PAT with `contents: write` scope on
 #                     48Nauts-Operator/vynl-app. Used to push commits +
 #                     tags and create releases.
 
@@ -38,10 +38,10 @@ jobs:
 
       - name: Add GitHub remote and push to main
         env:
-          GITHUB_PAT: ${{ secrets.GITHUB_SYNC_PAT }}
+          GITHUB_PAT: ${{ secrets.SYNC_PAT }}
         run: |
           if [ -z "$GITHUB_PAT" ]; then
-            echo "::error::GITHUB_SYNC_PAT secret is not set in Forgejo Actions"
+            echo "::error::SYNC_PAT secret is not set in Forgejo Actions"
             exit 1
           fi
           git remote add github "https://x-access-token:${GITHUB_PAT}@github.com/48Nauts-Operator/vynl-app.git"
@@ -50,7 +50,7 @@ jobs:
 
       - name: Create release tag (if new version)
         env:
-          GITHUB_PAT: ${{ secrets.GITHUB_SYNC_PAT }}
+          GITHUB_PAT: ${{ secrets.SYNC_PAT }}
           TAG: ${{ steps.ver.outputs.tag }}
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
@@ -63,7 +63,7 @@ jobs:
 
       - name: Create GitHub release (auto-generated notes)
         env:
-          GITHUB_PAT: ${{ secrets.GITHUB_SYNC_PAT }}
+          GITHUB_PAT: ${{ secrets.SYNC_PAT }}
           TAG: ${{ steps.ver.outputs.tag }}
         run: |
           # Skip if release already exists (idempotent)
