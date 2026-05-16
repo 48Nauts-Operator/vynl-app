@@ -5,8 +5,10 @@ services:
     image: ghcr.io/48nauts-operator/vynl-app:latest
     container_name: vynl
     restart: unless-stopped
-    ports:
-      - "3101:3101"
+    # Host networking is required for Sonos auto-discovery (SSDP multicast
+    # does not traverse Docker's default bridge network). The app still
+    # listens on port 3101.
+    network_mode: host
     volumes:
       - /volume1/Music/library:/music/library:ro
       - /volume1/Music/library.db:/music/library.db
@@ -26,6 +28,10 @@ services:
       # - ANTHROPIC_API_KEY=
       # - SPOTIFY_CLIENT_ID=
       # - SPOTIFY_CLIENT_SECRET=
+      # Optional. Set to the IP of any one Sonos speaker on the LAN if SSDP
+      # discovery returns nothing (e.g. multicast blocked between VLANs).
+      # The rest of the household is discovered via topology from this seed.
+      # - SONOS_SEED_IP=192.168.74.226
 
 volumes:
   vynl-data:

@@ -295,3 +295,78 @@ export async function fetchAudioFeatures(
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+// ── Client-credentials Search ────────────────────────────────────────
+// Independent of the user OAuth flow above — used for the Sonos /api/sonos
+// "play this track" search, where we don't need (or want) the user's library
+// scopes. Replaces the search functionality previously provided by the bundled
+// sonos CLI.
+
+export interface SpotifySearchResult {
+  title: string;
+  artist: string;
+  album: string;
+  uri: string;
+}
+
+let clientCredentialsToken: { accessToken: string; expiresAt: number } | null = null;
+
+async function getClientCredentialsToken(): Promise<string | null> {
+  const clientId = process.env.SPOTIFY_CLIENT_ID;
+  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+  if (!clientId || !clientSecret) return null;
+
+  if (clientCredentialsToken && Date.now() < clientCredentialsToken.expiresAt) {
+    return clientCredentialsToken.accessToken;
+  }
+
+  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+  const res = await fetch(SPOTIFY_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${basic}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: "grant_type=client_credentials",
+  });
+
+  if (!res.ok) return null;
+  const data = (await res.json()) as { access_token: string; expires_in: number };
+  clientCredentialsToken = {
+    accessToken: data.access_token,
+    expiresAt: Date.now() + (data.expires_in - 300) * 1000,
+  };
+  return clientCredentialsToken.accessToken;
+}
+
+export async function searchSpotify(
+  query: string,
+  limit = 10
+): Promise<SpotifySearchResult[]> {
+  const token = await getClientCredentialsToken();
+  if (!token) return [];
+
+  const url = new URL(`${SPOTIFY_API_BASE}/search`);
+  url.searchParams.set("q", query);
+  url.searchParams.set("type", "track");
+  url.searchParams.set("limit", String(Math.min(Math.max(limit, 1), 50)));
+
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) return [];
+
+  type SpotifyTrack = {
+    name: string;
+    uri: string;
+    artists: { name: string }[];
+    album: { name: string };
+  };
+  const data = (await res.json()) as { tracks?: { items?: SpotifyTrack[] } };
+  const items = data.tracks?.items ?? [];
+
+  return items.map((t) => ({
+    title: t.name,
+    artist: t.artists?.[0]?.name ?? "",
+    album: t.album?.name ?? "",
+    uri: t.uri,
+  }));
+}

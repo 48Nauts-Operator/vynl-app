@@ -5,6 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { usePlayerStore } from "@/store/player";
 import {
   Speaker,
@@ -29,6 +37,10 @@ import { motion } from "framer-motion";
 interface SpeakerInfo {
   name: string;
   ip: string;
+  udn?: string;
+  coordinatorUdn?: string;
+  coordinatorName?: string;
+  groupName?: string;
   model?: string;
 }
 
@@ -165,6 +177,20 @@ export default function SpeakersPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "party", speaker: speakers[0].name }),
     });
+    fetchSpeakers();
+  };
+
+  const groupAction = async (
+    action: "join" | "leave" | "dissolve" | "party",
+    payload: { speaker?: string; target?: string; coordinatorUdn?: string }
+  ) => {
+    await fetch("/api/sonos/group", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ...payload }),
+    });
+    // Give Sonos a beat to propagate the topology change, then re-fetch.
+    setTimeout(fetchSpeakers, 600);
   };
 
   const refreshAll = () => {
@@ -219,118 +245,281 @@ export default function SpeakersPage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {speakers.map((speaker, i) => {
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+            {(() => {
+              // Compute zone groupings: speakers sharing a coordinatorUdn
+              // (and with more than one member) are playing together.
+              const membersByCoord = new Map<string, SpeakerInfo[]>();
+              for (const s of speakers) {
+                const coord = s.coordinatorUdn || s.udn;
+                if (!coord) continue;
+                const list = membersByCoord.get(coord) ?? [];
+                list.push(s);
+                membersByCoord.set(coord, list);
+              }
+              const groupPalette = [
+                { ring: "ring-cyan-500/60", stripe: "bg-cyan-500", text: "text-cyan-400" },
+                { ring: "ring-fuchsia-500/60", stripe: "bg-fuchsia-500", text: "text-fuchsia-400" },
+                { ring: "ring-amber-500/60", stripe: "bg-amber-500", text: "text-amber-400" },
+                { ring: "ring-sky-500/60", stripe: "bg-sky-500", text: "text-sky-400" },
+                { ring: "ring-rose-500/60", stripe: "bg-rose-500", text: "text-rose-400" },
+              ];
+              const groupColor = new Map<string, typeof groupPalette[number]>();
+              let groupIdx = 0;
+              for (const [coord, members] of membersByCoord.entries()) {
+                if (members.length > 1) {
+                  groupColor.set(coord, groupPalette[groupIdx % groupPalette.length]);
+                  groupIdx++;
+                }
+              }
+              return speakers.map((speaker, i) => {
               const status = statuses[speaker.name];
               const isActive =
                 outputTarget === "sonos" && sonosSpeaker === speaker.name;
+              const isPlaying = status?.state === "PLAYING";
+              const coordKey = speaker.coordinatorUdn || speaker.udn || "";
+              const groupMembers = (membersByCoord.get(coordKey) ?? []).filter(
+                (m) => m.udn !== speaker.udn
+              );
+              const groupTheme = groupColor.get(coordKey);
+              const allGroupMembers = membersByCoord.get(coordKey) ?? [];
+              const groupLabel = allGroupMembers.map((m) => m.name).join(" + ");
 
               return (
                 <motion.div
-                  key={speaker.name}
-                  initial={{ opacity: 0, y: 20 }}
+                  key={speaker.udn ?? `${speaker.name}-${speaker.ip}`}
+                  initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.1 }}
+                  transition={{ delay: i * 0.05 }}
                 >
                   <Card
-                    className={`transition-colors ${isActive ? "border-primary" : ""}`}
+                    className={`relative overflow-hidden p-0 gap-0 transition-colors ${
+                      isActive ? "border-primary ring-1 ring-primary/30" : ""
+                    } ${groupTheme ? `ring-1 ${groupTheme.ring}` : ""}`}
                   >
-                    <CardHeader className="flex flex-row items-center justify-between pb-2">
-                      <CardTitle className="text-base flex items-center gap-2">
-                        <Speaker className="h-5 w-5" />
-                        {speaker.name}
-                      </CardTitle>
-                      <Badge
-                        variant={
-                          status?.state === "PLAYING" ? "default" : "secondary"
-                        }
-                      >
-                        {status?.state || "Unknown"}
-                      </Badge>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      {status?.title && (
-                        <div className="text-sm">
-                          <p className="font-medium truncate">{status.title}</p>
-                          <p className="text-muted-foreground truncate">
-                            {status.artist}
+                    {groupTheme && (
+                      <span
+                        className={`absolute left-0 top-0 bottom-0 w-1 ${groupTheme.stripe}`}
+                        aria-hidden
+                      />
+                    )}
+                    {/* Speaker grille — dotted pattern, recessed feel */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOutputTarget("sonos");
+                        setSonosSpeaker(speaker.name);
+                        setSystemDevice(null);
+                      }}
+                      className="relative block w-full h-20 bg-neutral-900 dark:bg-neutral-950 cursor-pointer group overflow-hidden"
+                      title={isActive ? "Active output" : "Set as output"}
+                    >
+                      <div
+                        className="absolute inset-0 opacity-60"
+                        style={{
+                          backgroundImage:
+                            "radial-gradient(circle, rgba(255,255,255,0.18) 1px, transparent 1.4px)",
+                          backgroundSize: "8px 8px",
+                          backgroundPosition: "center",
+                        }}
+                      />
+                      <div className="absolute inset-0 shadow-[inset_0_2px_8px_rgba(0,0,0,0.6)]" />
+
+                      {/* LED text display — 2 lines, scrolling */}
+                      <div className="absolute inset-0 flex flex-col items-center justify-center font-mono uppercase tracking-wider pointer-events-none">
+                        {isPlaying ? (
+                          <>
+                            <div className="w-full overflow-hidden">
+                              <p
+                                className="text-[11px] leading-4 whitespace-nowrap text-emerald-400 inline-block"
+                                style={{
+                                  textShadow: "0 0 6px rgba(52,211,153,0.85)",
+                                  animation: "led-marquee 14s linear infinite",
+                                }}
+                              >
+                                {status?.title || "Now Playing"}&nbsp;&nbsp;&nbsp;&bull;&nbsp;&nbsp;&nbsp;
+                              </p>
+                            </div>
+                            <div className="w-full overflow-hidden">
+                              <p
+                                className="text-[10px] leading-4 whitespace-nowrap text-emerald-400/80 inline-block"
+                                style={{
+                                  textShadow: "0 0 5px rgba(52,211,153,0.65)",
+                                  animation: "led-marquee 18s linear infinite",
+                                }}
+                              >
+                                {status?.artist || "—"}&nbsp;&nbsp;&nbsp;&bull;&nbsp;&nbsp;&nbsp;
+                              </p>
+                            </div>
+                          </>
+                        ) : (
+                          <p
+                            className="text-[11px] leading-4 text-red-500 text-center px-3"
+                            style={{ textShadow: "0 0 6px rgba(239,68,68,0.85)" }}
+                          >
+                            Offline
                           </p>
-                        </div>
+                        )}
+                      </div>
+
+                      {/* LED indicator */}
+                      <span
+                        className={`absolute top-2 right-2 h-1.5 w-1.5 rounded-full ${
+                          isPlaying
+                            ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)] animate-pulse"
+                            : isActive
+                              ? "bg-amber-400 shadow-[0_0_4px_rgba(251,191,36,0.7)]"
+                              : "bg-red-500/70 shadow-[0_0_4px_rgba(239,68,68,0.7)]"
+                        }`}
+                      />
+                      {/* Active output overlay */}
+                      {isActive && (
+                        <span className="absolute top-2 left-2 text-[10px] uppercase tracking-wider text-amber-300/90 font-medium">
+                          Output
+                        </span>
+                      )}
+                    </button>
+
+                    {/* Info + controls */}
+                    <div className="p-3 space-y-2">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <h3 className="text-sm font-semibold truncate flex items-center gap-1">
+                          {groupTheme && (
+                            <LinkIcon
+                              className={`h-3 w-3 shrink-0 ${groupTheme.text}`}
+                            />
+                          )}
+                          {speaker.name}
+                        </h3>
+                        <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">
+                          {status?.state ?? "—"}
+                        </span>
+                      </div>
+
+                      {groupMembers.length > 0 && groupTheme && (
+                        <p
+                          className={`text-[10px] uppercase tracking-wider truncate ${groupTheme.text}`}
+                          title={groupLabel}
+                        >
+                          ▸ Group: {groupLabel}
+                        </p>
                       )}
 
-                      <div className="flex items-center justify-center gap-2">
+                      <div className="flex items-center gap-1">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 shrink-0"
+                              title="Grouping"
+                            >
+                              <Users className="h-3.5 w-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" className="w-56">
+                            <DropdownMenuLabel className="text-xs">
+                              Grouping — {speaker.name}
+                            </DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {groupMembers.length > 0 && (
+                              <>
+                                <DropdownMenuItem
+                                  onClick={() =>
+                                    groupAction("leave", { speaker: speaker.name })
+                                  }
+                                >
+                                  Leave group
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                              </>
+                            )}
+                            <DropdownMenuLabel className="text-[10px] text-muted-foreground font-normal">
+                              Join another speaker&apos;s group
+                            </DropdownMenuLabel>
+                            {speakers
+                              .filter(
+                                (other) =>
+                                  other.udn !== speaker.udn &&
+                                  // Don't list members of this speaker's own group
+                                  (other.coordinatorUdn || other.udn) !== coordKey
+                              )
+                              .map((other) => (
+                                <DropdownMenuItem
+                                  key={other.udn ?? other.name}
+                                  onClick={() =>
+                                    groupAction("join", {
+                                      speaker: speaker.name,
+                                      target: other.coordinatorName ?? other.name,
+                                    })
+                                  }
+                                >
+                                  {other.name}
+                                </DropdownMenuItem>
+                              ))}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onClick={() =>
+                                groupAction("party", { speaker: speaker.name })
+                              }
+                            >
+                              Party mode (group all)
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8"
-                          onClick={() =>
-                            controlSpeaker(speaker.name, "previous")
-                          }
+                          className="h-7 w-7 shrink-0"
+                          onClick={() => controlSpeaker(speaker.name, "previous")}
                         >
-                          <SkipBack className="h-4 w-4" />
+                          <SkipBack className="h-3.5 w-3.5" />
                         </Button>
                         <Button
                           variant="default"
                           size="icon"
-                          className="h-9 w-9 rounded-full"
+                          className="h-7 w-7 rounded-full shrink-0"
                           onClick={() =>
                             controlSpeaker(
                               speaker.name,
-                              status?.state === "PLAYING" ? "pause" : "play"
+                              isPlaying ? "pause" : "play"
                             )
                           }
                         >
-                          {status?.state === "PLAYING" ? (
-                            <Pause className="h-4 w-4" />
+                          {isPlaying ? (
+                            <Pause className="h-3.5 w-3.5" />
                           ) : (
-                            <Play className="h-4 w-4 ml-0.5" />
+                            <Play className="h-3.5 w-3.5 ml-0.5" />
                           )}
                         </Button>
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8"
+                          className="h-7 w-7 shrink-0"
                           onClick={() => controlSpeaker(speaker.name, "next")}
                         >
-                          <SkipForward className="h-4 w-4" />
+                          <SkipForward className="h-3.5 w-3.5" />
                         </Button>
+                        <div className="flex items-center gap-1.5 flex-1 min-w-0 ml-1">
+                          <Volume2 className="h-3 w-3 text-muted-foreground shrink-0" />
+                          <Slider
+                            value={[status?.volume ?? 50]}
+                            max={100}
+                            step={1}
+                            onValueChange={([v]) => setVolume(speaker.name, v)}
+                            className="flex-1"
+                          />
+                          <span className="text-[10px] text-muted-foreground w-6 text-right tabular-nums shrink-0">
+                            {status?.volume ?? 50}
+                          </span>
+                        </div>
                       </div>
-
-                      <div className="flex items-center gap-2">
-                        <Volume2 className="h-4 w-4 text-muted-foreground" />
-                        <Slider
-                          value={[status?.volume || 50]}
-                          max={100}
-                          step={1}
-                          onValueChange={([v]) => setVolume(speaker.name, v)}
-                          className="flex-1"
-                        />
-                        <span className="text-xs text-muted-foreground w-8 text-right">
-                          {status?.volume || 50}%
-                        </span>
-                      </div>
-
-                      <Button
-                        variant={isActive ? "default" : "outline"}
-                        className="w-full"
-                        onClick={() => {
-                          setOutputTarget("sonos");
-                          setSonosSpeaker(speaker.name);
-                          setSystemDevice(null);
-                        }}
-                      >
-                        {isActive ? (
-                          <Check className="h-4 w-4 mr-2" />
-                        ) : (
-                          <LinkIcon className="h-4 w-4 mr-2" />
-                        )}
-                        {isActive ? "Active Output" : "Set as Output"}
-                      </Button>
-                    </CardContent>
+                    </div>
                   </Card>
                 </motion.div>
               );
-            })}
+              });
+            })()}
           </div>
         )}
       </section>

@@ -187,19 +187,10 @@ export async function GET(request: NextRequest) {
       const results = await sonos.searchSpotify(query, 5);
 
       for (const item of results) {
-        // Parse artist from subtitle: "Artist — Album"
-        let artist = "Unknown";
-        let album: string | undefined;
-        if (item.subtitle) {
-          const parts = item.subtitle.split(" — ");
-          artist = parts[0] || "Unknown";
-          album = parts[1];
-        }
-
         spotifyTracks.push({
-          title: item.title || item.name || "Unknown",
-          artist: item.artist || artist,
-          album: item.album || album,
+          title: item.title || "Unknown",
+          artist: item.artist || "Unknown",
+          album: item.album || undefined,
           spotifyUri: item.uri,
           source: "spotify",
         });

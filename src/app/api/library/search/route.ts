@@ -65,10 +65,10 @@ export async function GET(request: NextRequest) {
       for (const item of spotifyResults) {
         results.push({
           source: "spotify",
-          title: item.name || item.title || "Unknown",
-          artist: item.artist || item.artists?.[0]?.name || "Unknown",
-          album: item.album || item.album_name,
-          spotifyUri: item.uri || item.spotify_uri,
+          title: item.title || "Unknown",
+          artist: item.artist || "Unknown",
+          album: item.album || undefined,
+          spotifyUri: item.uri,
         });
       }
     } catch {

@@ -5,11 +5,10 @@ services:
     # build: .
     container_name: vynl
     restart: unless-stopped
-    ports:
-      - "3101:3101"
-    # Use host network if Sonos speakers need to reach the container directly.
-    # Uncomment the line below and remove the 'ports' section above:
-    # network_mode: host
+    # Host networking is required for Sonos auto-discovery (SSDP multicast
+    # does not traverse Docker's default bridge network). The app still
+    # listens on port 3101.
+    network_mode: host
     volumes:
       # Music library (NAS mount or local path)
       - ${MUSIC_LIBRARY_PATH:-/mnt/music}/library:/music/library
@@ -36,6 +35,10 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID:-}
       - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET:-}
+      # Optional. Set to the IP of any one Sonos speaker on the LAN if SSDP
+      # discovery returns nothing (e.g. multicast blocked between VLANs).
+      # The rest of the household is discovered via topology from this seed.
+      - SONOS_SEED_IP=${SONOS_SEED_IP:-}
 
 volumes:
   vynl-data:
