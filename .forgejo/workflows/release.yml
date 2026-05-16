@@ -45,8 +45,16 @@ jobs:
             exit 1
           fi
           git remote add github "https://x-access-token:${GITHUB_PAT}@github.com/48Nauts-Operator/vynl-app.git"
+          # Fetch first so --force-with-lease sees the current GitHub main SHA.
+          git fetch github main
           echo "Pushing $(git rev-parse HEAD) to GitHub main..."
-          git push github HEAD:main
+          # Force-with-lease overwrites GitHub main with UAT's HEAD.
+          # Required because empty trigger commits on UAT make its history
+          # diverge from main between releases; a regular push would fail
+          # as non-fast-forward. Force-with-lease still refuses if main
+          # was changed by anything other than what we last fetched, so
+          # any genuinely surprising commits on main are preserved.
+          git push github HEAD:main --force-with-lease=main:$(git rev-parse refs/remotes/github/main)
 
       - name: Create release tag (if new version)
         env:
