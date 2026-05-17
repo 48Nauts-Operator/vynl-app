@@ -332,6 +332,45 @@ sqlite.exec(`
   );
   INSERT OR IGNORE INTO llm_settings (id, provider, model)
     VALUES (1, 'anthropic', 'claude-sonnet-4-7');
+
+  CREATE TABLE IF NOT EXISTS beetsai_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    issue_type TEXT NOT NULL,
+    album_name TEXT NOT NULL,
+    album_artist TEXT,
+    beets_command TEXT NOT NULL,
+    beets_args TEXT,
+    before TEXT,
+    after TEXT,
+    source TEXT NOT NULL,
+    confidence REAL,
+    llm_model TEXT,
+    reasoning TEXT,
+    status TEXT NOT NULL DEFAULT 'applied',
+    applied_at TEXT DEFAULT (datetime('now')),
+    rolled_back_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_beetsai_actions_album ON beetsai_actions(album_name);
+  CREATE INDEX IF NOT EXISTS idx_beetsai_actions_status ON beetsai_actions(status);
+
+  CREATE TABLE IF NOT EXISTS beetsai_review (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_id TEXT NOT NULL,
+    issue_type TEXT NOT NULL,
+    album_name TEXT NOT NULL,
+    album_artist TEXT,
+    context TEXT NOT NULL,
+    proposed_command TEXT NOT NULL,
+    proposed_args TEXT,
+    confidence REAL,
+    llm_model TEXT,
+    reasoning TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT DEFAULT (datetime('now')),
+    resolved_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_beetsai_review_scan ON beetsai_review(scan_id);
+  CREATE INDEX IF NOT EXISTS idx_beetsai_review_status ON beetsai_review(status);
 `);
 
 // Migrations — add columns that may not exist in older databases

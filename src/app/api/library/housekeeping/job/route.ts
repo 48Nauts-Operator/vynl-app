@@ -433,6 +433,238 @@ async function runRefreshGenres() {
   });
 }
 
+// ── BeetsAI Doctor ──
+
+async function runBeetsDoctor() {
+  const job = g.job;
+  if (!job) return;
+
+  const {
+    findCompilationCandidates,
+    findDiscSplits,
+  } = await import("@/lib/beets-doctor/detect");
+  const { buildCompilationPrompt, buildDiscSplitPrompt } = await import(
+    "@/lib/beets-doctor/prompts"
+  );
+  const { applyModify, applyWrite } = await import("@/lib/beets-doctor/apply");
+  const { generateText, getActiveSettings } = await import("@/lib/llm");
+  const { beetsaiActions, beetsaiReview } = await import("@/lib/db/schema");
+  const dbModule = await import("@/lib/db");
+  const localDb = dbModule.db;
+
+  const scanId = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const llm = getActiveSettings();
+  log(`Scan ${scanId} starting — LLM: ${llm.provider}/${llm.model}`);
+  log("");
+
+  let autoApplied = 0;
+  let queued = 0;
+  let errors = 0;
+  let scanned = 0;
+
+  interface LLMVerdict {
+    shouldFix: boolean;
+    confidence: number;
+    command: "modify" | "skip";
+    args: string[];
+    reasoning: string;
+  }
+
+  async function consultLLM(prompt: string): Promise<LLMVerdict | null> {
+    try {
+      const text = await generateText({
+        maxTokens: 600,
+        jsonMode: true,
+        messages: [{ role: "user", content: prompt }],
+      });
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) return null;
+      const parsed = JSON.parse(match[0]) as LLMVerdict;
+      // Clamp and normalize
+      parsed.confidence = Math.max(0, Math.min(1, Number(parsed.confidence) || 0));
+      return parsed;
+    } catch (err) {
+      log(`  LLM call failed: ${err}`);
+      return null;
+    }
+  }
+
+  // ── Pass 1: Unflagged compilation candidates ──
+  log("━━━ Pass 1/2: Unflagged compilations ━━━");
+  const comps = findCompilationCandidates();
+  log(`Found ${comps.length} candidate(s) to evaluate.`);
+  log("");
+  job.total = comps.length; // initial estimate; updated when pass 2 starts
+
+  for (let i = 0; i < comps.length; i++) {
+    if (job.status === "cancelled") return;
+    const c = comps[i];
+    job.current = i + 1;
+    scanned++;
+    log(`→ [${i + 1}/${comps.length}] "${c.album}" (${c.distinctArtists} artists, ${c.trackCount} tracks)`);
+
+    const verdict = await consultLLM(buildCompilationPrompt(c));
+    if (!verdict) {
+      log(`  ⚠ LLM returned no valid JSON — skipping`);
+      errors++;
+      continue;
+    }
+    if (!verdict.shouldFix) {
+      log(`  ✓ LLM says not a compilation (${(verdict.confidence * 100).toFixed(0)}% conf) — skipping`);
+      continue;
+    }
+
+    if (verdict.confidence >= 1.0) {
+      log(`  → applying: beet ${verdict.args.join(" ")}`);
+      const result = await applyModify(verdict.args, c.album);
+      if (result.success) {
+        localDb.insert(beetsaiActions).values({
+          issueType: "compilation",
+          albumName: c.album,
+          albumArtist: c.currentAlbumArtist,
+          beetsCommand: `beet ${verdict.args.join(" ")}`,
+          beetsArgs: JSON.stringify(verdict.args),
+          before: JSON.stringify(result.before || {}),
+          after: JSON.stringify(result.after || {}),
+          source: "auto",
+          confidence: verdict.confidence,
+          llmModel: llm.model,
+          reasoning: verdict.reasoning,
+          status: "applied",
+        }).run();
+        log(`  ✓ applied — ${verdict.reasoning}`);
+        autoApplied++;
+      } else {
+        log(`  ✗ apply failed: ${result.error}`);
+        errors++;
+      }
+    } else {
+      localDb.insert(beetsaiReview).values({
+        scanId,
+        issueType: "compilation",
+        albumName: c.album,
+        albumArtist: c.currentAlbumArtist,
+        context: JSON.stringify({
+          trackCount: c.trackCount,
+          distinctArtists: c.distinctArtists,
+          sampleArtists: c.sampleArtists,
+          sampleTitles: c.sampleTitles,
+          year: c.year,
+        }),
+        proposedCommand: `beet ${verdict.args.join(" ")}`,
+        proposedArgs: JSON.stringify(verdict.args),
+        confidence: verdict.confidence,
+        llmModel: llm.model,
+        reasoning: verdict.reasoning,
+        status: "pending",
+      }).run();
+      log(`  ⊕ queued for review (${(verdict.confidence * 100).toFixed(0)}% conf) — ${verdict.reasoning}`);
+      queued++;
+    }
+  }
+
+  // ── Pass 2: Disc / volume splits ──
+  log("");
+  log("━━━ Pass 2/2: Disc / volume splits ━━━");
+  const splits = findDiscSplits();
+  log(`Found ${splits.length} candidate group(s).`);
+  log("");
+  job.total = comps.length + splits.length;
+
+  for (let i = 0; i < splits.length; i++) {
+    if (job.status === "cancelled") return;
+    const s = splits[i];
+    job.current = comps.length + i + 1;
+    scanned++;
+    log(
+      `→ [${i + 1}/${splits.length}] "${s.baseName}" (${s.parts.length} variants: ${s.parts.map((p) => `"${p.album}"`).join(" + ")})`
+    );
+
+    const verdict = await consultLLM(buildDiscSplitPrompt(s));
+    if (!verdict) {
+      log(`  ⚠ LLM returned no valid JSON — skipping`);
+      errors++;
+      continue;
+    }
+    if (!verdict.shouldFix) {
+      log(`  ✓ LLM says these are distinct albums (${(verdict.confidence * 100).toFixed(0)}% conf) — skipping`);
+      continue;
+    }
+
+    // For each variant whose name ≠ base, rename it to base.
+    if (verdict.confidence >= 1.0) {
+      let anyFailed = false;
+      for (const part of s.parts) {
+        if (part.album === s.baseName) continue;
+        const renameArgs = [
+          "modify",
+          "-y",
+          `album:${part.album}`,
+          `album=${s.baseName}`,
+        ];
+        log(`  → applying: beet ${renameArgs.join(" ")}`);
+        const result = await applyModify(renameArgs, part.album);
+        if (result.success) {
+          localDb.insert(beetsaiActions).values({
+            issueType: "disc-split",
+            albumName: part.album,
+            albumArtist: part.albumArtist,
+            beetsCommand: `beet ${renameArgs.join(" ")}`,
+            beetsArgs: JSON.stringify(renameArgs),
+            before: JSON.stringify(result.before || {}),
+            after: JSON.stringify(result.after || {}),
+            source: "auto",
+            confidence: verdict.confidence,
+            llmModel: llm.model,
+            reasoning: verdict.reasoning,
+            status: "applied",
+          }).run();
+          autoApplied++;
+        } else {
+          log(`  ✗ apply failed: ${result.error}`);
+          errors++;
+          anyFailed = true;
+        }
+      }
+      // Push DB changes to file tags so future scans see them.
+      if (!anyFailed) {
+        await applyWrite(`album:${s.baseName}`);
+      }
+      log(`  ✓ merged variants into "${s.baseName}"`);
+    } else {
+      localDb.insert(beetsaiReview).values({
+        scanId,
+        issueType: "disc-split",
+        albumName: s.baseName,
+        albumArtist: s.parts[0].albumArtist,
+        context: JSON.stringify({
+          variants: s.parts,
+        }),
+        proposedCommand: `beet modify -y album:<each-variant> album=${s.baseName}`,
+        proposedArgs: JSON.stringify(s.parts.map((p) => p.album)),
+        confidence: verdict.confidence,
+        llmModel: llm.model,
+        reasoning: verdict.reasoning,
+        status: "pending",
+      }).run();
+      log(`  ⊕ queued for review (${(verdict.confidence * 100).toFixed(0)}% conf) — ${verdict.reasoning}`);
+      queued++;
+    }
+  }
+
+  log("");
+  log("━━━ COMPLETE ━━━");
+  log(`Scanned ${scanned} candidates`);
+  log(`Auto-applied: ${autoApplied}`);
+  log(`Queued for review: ${queued}`);
+  log(`Errors: ${errors}`);
+  log("");
+  log(`Review queue at Library → Doctor → Review (scan id: ${scanId})`);
+  log("Run a library scan afterwards so Vynl picks up the changes.");
+
+  job.result = { scanId, scanned, autoApplied, queued, errors };
+}
+
 // ── Main background runner ──
 
 async function runHousekeepingJob() {
@@ -452,6 +684,9 @@ async function runHousekeepingJob() {
         break;
       case "refresh-genres":
         await runRefreshGenres();
+        break;
+      case "beets-doctor":
+        await runBeetsDoctor();
         break;
     }
 
@@ -474,7 +709,7 @@ async function runHousekeepingJob() {
 
 // ── HTTP handlers ──
 
-const VALID_ACTIONS = ["clean-missing", "refresh-metadata", "fetch-artwork", "refresh-genres"];
+const VALID_ACTIONS = ["clean-missing", "refresh-metadata", "fetch-artwork", "refresh-genres", "beets-doctor"];
 
 export async function POST(request: NextRequest) {
   const job = g.job;

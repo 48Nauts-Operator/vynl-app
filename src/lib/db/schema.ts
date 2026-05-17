@@ -422,3 +422,46 @@ export const llmSettings = sqliteTable("llm_settings", {
 });
 
 export type LLMSettings = typeof llmSettings.$inferSelect;
+
+// ---------- BeetsAI Doctor ----------
+
+// Knowledge library: every action Doctor has taken (auto-applied or accepted
+// from review). Source of truth for audit, stats, and rollback.
+export const beetsaiActions = sqliteTable("beetsai_actions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  issueType: text("issue_type").notNull(), // "compilation" | "disc-split" | "feat-variant" | "wrong-genre"
+  albumName: text("album_name").notNull(),
+  albumArtist: text("album_artist"),
+  beetsCommand: text("beets_command").notNull(), // exact `beet ...` invocation, for audit
+  beetsArgs: text("beets_args"), // JSON array of args actually passed
+  before: text("before"), // JSON snapshot of the fields being changed
+  after: text("after"), // JSON snapshot post-fix
+  source: text("source").notNull(), // "auto" | "review-accepted" | "rollback"
+  confidence: real("confidence"),
+  llmModel: text("llm_model"),
+  reasoning: text("reasoning"),
+  status: text("status").notNull().default("applied"), // "applied" | "rolled-back" | "failed"
+  appliedAt: text("applied_at").default(sql`(datetime('now'))`),
+  rolledBackAt: text("rolled_back_at"),
+});
+
+// Findings the LLM wasn't 100% confident on — awaiting human review.
+export const beetsaiReview = sqliteTable("beetsai_review", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  scanId: text("scan_id").notNull(), // UUID per Doctor run
+  issueType: text("issue_type").notNull(),
+  albumName: text("album_name").notNull(),
+  albumArtist: text("album_artist"),
+  context: text("context").notNull(), // JSON: trackCount, distinctArtists, year, sampleTitles, etc.
+  proposedCommand: text("proposed_command").notNull(),
+  proposedArgs: text("proposed_args"),
+  confidence: real("confidence"),
+  llmModel: text("llm_model"),
+  reasoning: text("reasoning"),
+  status: text("status").notNull().default("pending"), // "pending" | "accepted" | "dismissed"
+  createdAt: text("created_at").default(sql`(datetime('now'))`),
+  resolvedAt: text("resolved_at"),
+});
+
+export type BeetsAIAction = typeof beetsaiActions.$inferSelect;
+export type BeetsAIReview = typeof beetsaiReview.$inferSelect;

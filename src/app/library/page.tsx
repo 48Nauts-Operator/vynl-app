@@ -35,9 +35,11 @@ import {
   ArrowDown,
   ArrowUpDown,
   Tag,
+  Stethoscope,
 } from "lucide-react";
 import Image from "next/image";
 import { motion } from "framer-motion";
+import { DoctorTab } from "@/components/library/DoctorTab";
 import { formatDuration, formatFileSize } from "@/lib/utils";
 
 function dbToPlayerTrack(t: DBTrack): PlayerTrack {
@@ -1254,6 +1256,9 @@ export default function LibraryPage() {
           <TabsTrigger value="housekeeping">
             <Wrench className="h-4 w-4 mr-1" /> Housekeeping
           </TabsTrigger>
+          <TabsTrigger value="doctor">
+            <Stethoscope className="h-4 w-4 mr-1" /> Doctor
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="browse">
@@ -1503,6 +1508,10 @@ export default function LibraryPage() {
 
         <TabsContent value="housekeeping">
           <HousekeepingTab />
+        </TabsContent>
+
+        <TabsContent value="doctor">
+          <DoctorTab />
         </TabsContent>
       </Tabs>
     </div>
