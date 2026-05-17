@@ -1,0 +1,69 @@
+# Vynl beets configuration template.
+# Copy this to beets-config.yaml and edit the paths for your setup.
+# On Docker, this file is mounted into the container at
+# /home/vynl/.config/beets/config.yaml — see docker-compose.yml /
+# portainer-stack.yml for the bind mount.
+
+# ── Library paths ───────────────────────────────────────────────────
+# In the container these are the *internal* paths (Docker mount targets),
+# not host paths. Adjust for native dev as needed.
+directory: /music/library
+library: /music/library.db
+
+import:
+  move: yes
+  autotag: yes
+  duplicate_action: skip
+  group_albums: yes
+
+paths:
+  default: $albumartist/$album%aunique{}/$track $title
+  singleton: Non-Album/$artist/$title
+  comp: Compilations/$album%aunique{}/$track $title
+
+# ── Plugins ─────────────────────────────────────────────────────────
+plugins: fetchart embedart lastgenre mbsync replaygain
+
+fetchart:
+  auto: yes
+  cautious: yes
+
+embedart:
+  auto: yes
+  maxwidth: 1000
+
+# Fetch canonical genres from Last.fm during import. Without this beets
+# preserves whatever the source ID3 tags say — that's how rock albums
+# end up tagged "Blues" etc. `source: album` = one genre per album
+# (not noisy per-track tags). `whitelist: yes` drops non-genre Last.fm
+# tags like "seen live" or "favourites".
+lastgenre:
+  auto: yes
+  source: album
+  whitelist: yes
+  count: 1
+  fallback: ""
+  force: no        # don't overwrite genres already set
+  separator: "; "
+
+# Manual MusicBrainz re-sync. Run `beet mbsync` periodically to pull in
+# upstream corrections (genre, year, track titles).
+mbsync:
+  auto: no
+
+# Volume normalisation. Computes ReplayGain tags during import so
+# playback stays at consistent level across albums of different
+# mastering eras.
+replaygain:
+  auto: yes
+  backend: ffmpeg
+  per_disc: yes
+
+# ── Backfilling existing tracks ─────────────────────────────────────
+# After enabling lastgenre, existing tracks already in the library
+# have whatever genre they had at import time. To backfill:
+#
+#   docker exec -it vynl beet lastgenre        # only fills empty genres
+#   docker exec -it vynl beet lastgenre -f     # force re-fetch all (overwrites)
+#
+# Then run a Vynl library rescan to surface the new genres.
