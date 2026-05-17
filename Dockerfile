@@ -58,6 +58,14 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
+# Beets DBs imported on macOS carry hardcoded /Volumes/Music paths.
+# Pre-create compatibility symlinks pointing at the /music bind mount
+# so those paths resolve at runtime. The targets don't need to exist
+# at build time — Linux symlinks resolve on access.
+RUN mkdir -p /Volumes \
+    && ln -sfn /music /Volumes/Music \
+    && ln -sfn /music /Volumes/Music-1
+
 # Create directories for runtime data
 RUN mkdir -p /app/data /app/public/covers \
     && chown -R vynl:vynl /app
