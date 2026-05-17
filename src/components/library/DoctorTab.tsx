@@ -58,6 +58,13 @@ export function DoctorTab() {
   const [reviewLoading, setReviewLoading] = useState(false);
   const [actingOnId, setActingOnId] = useState<number | null>(null);
 
+  // Plan mode = scan + LLM + queue, NO beets writes. Default ON in dev
+  // environments to keep local testing safe (the beets DB on Mac is
+  // typically a network mount of the same file Prod uses).
+  const [planOnly, setPlanOnly] = useState(
+    process.env.NODE_ENV !== "production"
+  );
+
   const logEndRef = React.useRef<HTMLDivElement | null>(null);
 
   const loadReviews = useCallback(async () => {
@@ -122,7 +129,7 @@ export function DoctorTab() {
       const res = await fetch("/api/library/housekeeping/job", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "beets-doctor" }),
+        body: JSON.stringify({ action: "beets-doctor", planOnly }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -177,16 +184,28 @@ export function DoctorTab() {
                 Scans the entire library, sends each problem to the configured LLM, auto-applies fixes the model is 100% confident in, queues the rest for review. Logged to the BeetsAI actions table.
               </p>
             </div>
-            {!running ? (
-              <Button onClick={startScan}>
-                <Play className="h-4 w-4 mr-2" />
-                Run Full Scan
-              </Button>
-            ) : (
-              <Button variant="outline" onClick={cancel}>
-                Cancel
-              </Button>
-            )}
+            <div className="flex items-center gap-3 flex-wrap">
+              <label className="text-xs flex items-center gap-1.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={planOnly}
+                  onChange={(e) => setPlanOnly(e.target.checked)}
+                  disabled={running}
+                  className="cursor-pointer"
+                />
+                <span>Plan only (no writes)</span>
+              </label>
+              {!running ? (
+                <Button onClick={startScan}>
+                  <Play className="h-4 w-4 mr-2" />
+                  {planOnly ? "Run Plan Scan" : "Run Full Scan"}
+                </Button>
+              ) : (
+                <Button variant="outline" onClick={cancel}>
+                  Cancel
+                </Button>
+              )}
+            </div>
           </div>
         </CardHeader>
         <CardContent>

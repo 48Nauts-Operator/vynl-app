@@ -8,8 +8,11 @@
 import { spawn } from "child_process";
 import Database from "better-sqlite3";
 
-const BEET_BIN = "/opt/vynl-venv/bin/beet";
-const BEETS_DB = "/music/library.db";
+// In Docker the beets venv lives at /opt/vynl-venv/bin/beet; on Mac dev
+// it's usually wherever `which beet` resolves. BEETS_BIN env var lets you
+// pin it explicitly.
+const BEET_BIN = process.env.BEETS_BIN || "/opt/vynl-venv/bin/beet";
+const BEETS_DB = process.env.BEETS_DB_PATH || "/music/library.db";
 
 export interface ApplyResult {
   success: boolean;

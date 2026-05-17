@@ -20,6 +20,9 @@ interface HousekeepingJob {
   startedAt: number;
   completedAt?: number;
   result?: Record<string, unknown>;
+  /** Per-job options passed in via POST body. Currently only consumed by
+   *  the beets-doctor action: planOnly = true skips all beet writes. */
+  options?: { planOnly?: boolean };
 }
 
 // ── Persist state on globalThis so it survives Next.js dev-mode hot-reloads ──
@@ -454,7 +457,11 @@ async function runBeetsDoctor() {
 
   const scanId = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const llm = getActiveSettings();
+  const planOnly = job.options?.planOnly === true;
   log(`Scan ${scanId} starting — LLM: ${llm.provider}/${llm.model}`);
+  if (planOnly) {
+    log("▣ PLAN MODE — no beet writes; findings logged only.");
+  }
   log("");
 
   let autoApplied = 0;
@@ -515,6 +522,34 @@ async function runBeetsDoctor() {
     }
 
     if (verdict.confidence >= 1.0) {
+      if (planOnly) {
+        // Plan mode: queue it as "auto-confidence" review so we can see
+        // what would have run, without touching beets.
+        localDb.insert(beetsaiReview).values({
+          scanId,
+          issueType: "compilation",
+          albumName: c.album,
+          albumArtist: c.currentAlbumArtist,
+          context: JSON.stringify({
+            trackCount: c.trackCount,
+            distinctArtists: c.distinctArtists,
+            sampleArtists: c.sampleArtists,
+            sampleTitles: c.sampleTitles,
+            year: c.year,
+            planMode: true,
+            wouldAutoApply: true,
+          }),
+          proposedCommand: `beet ${verdict.args.join(" ")}`,
+          proposedArgs: JSON.stringify(verdict.args),
+          confidence: verdict.confidence,
+          llmModel: llm.model,
+          reasoning: verdict.reasoning,
+          status: "pending",
+        }).run();
+        log(`  ▣ PLAN: would auto-apply (100% conf) — ${verdict.reasoning}`);
+        queued++;
+        continue;
+      }
       log(`  → applying: beet ${verdict.args.join(" ")}`);
       const result = await applyModify(verdict.args, c.album);
       if (result.success) {
@@ -593,6 +628,28 @@ async function runBeetsDoctor() {
 
     // For each variant whose name ≠ base, rename it to base.
     if (verdict.confidence >= 1.0) {
+      if (planOnly) {
+        localDb.insert(beetsaiReview).values({
+          scanId,
+          issueType: "disc-split",
+          albumName: s.baseName,
+          albumArtist: s.parts[0].albumArtist,
+          context: JSON.stringify({
+            variants: s.parts,
+            planMode: true,
+            wouldAutoApply: true,
+          }),
+          proposedCommand: `beet modify -y album:<each-variant> album=${s.baseName}`,
+          proposedArgs: JSON.stringify(s.parts.map((p) => p.album)),
+          confidence: verdict.confidence,
+          llmModel: llm.model,
+          reasoning: verdict.reasoning,
+          status: "pending",
+        }).run();
+        log(`  ▣ PLAN: would auto-merge ${s.parts.length} variants into "${s.baseName}" — ${verdict.reasoning}`);
+        queued++;
+        continue;
+      }
       let anyFailed = false;
       for (const part of s.parts) {
         if (part.album === s.baseName) continue;
@@ -722,7 +779,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { action } = body;
+  const { action, planOnly } = body;
 
   if (!action || !VALID_ACTIONS.includes(action)) {
     return NextResponse.json(
@@ -741,6 +798,7 @@ export async function POST(request: NextRequest) {
     current: 0,
     logs: [],
     startedAt: Date.now(),
+    options: { planOnly: Boolean(planOnly) },
   };
 
   log(`Housekeeping started: ${action}`);
