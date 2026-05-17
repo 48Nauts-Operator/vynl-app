@@ -17,11 +17,11 @@ services:
       - vynl-data:/app/data
       - vynl-covers:/app/public/covers
       # Beets config — must be a bind mount so changes (plugin list, etc.)
-      # land in the container without rebuilding. Update the file on the
-      # NAS at /volume1/docker/vynl/beets-config.yaml or wherever you keep
-      # it; the in-repo beets-config.yaml at the root is the canonical
-      # version to copy from.
-      - /volume1/docker/vynl/beets-config.yaml:/home/vynl/.config/beets/config.yaml:ro
+      # land in the container without rebuilding. Co-located with the
+      # music library to avoid needing a separate /volume1/docker/vynl
+      # folder. Source of truth in the repo is beets-config.example.yaml;
+      # copy/rename it to /volume1/Music/beets-config.yaml on the NAS.
+      - /volume1/Music/beets-config.yaml:/home/vynl/.config/beets/config.yaml:ro
     environment:
       - MUSIC_LIBRARY_PATH=/music/library
       - BEETS_DB_PATH=/music/library.db
