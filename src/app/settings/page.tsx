@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LLMSettingsPanel } from "@/components/settings/LLMSettingsPanel";
+import { FlightCheckPanel } from "@/components/settings/FlightCheckPanel";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -770,6 +771,9 @@ export default function SettingsPage() {
           Configure your Vynl instance
         </p>
       </div>
+
+      {/* Flight Check — quick environment / dependency health */}
+      <FlightCheckPanel />
 
       {/* LLM Provider — used by album-analyze, discover, artist intel, DJ */}
       <LLMSettingsPanel />
