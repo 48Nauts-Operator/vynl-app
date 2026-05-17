@@ -35,7 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     ffmpeg \
     && python3 -m venv /opt/vynl-venv \
-    && /opt/vynl-venv/bin/pip install --no-cache-dir beets requests \
+    && /opt/vynl-venv/bin/pip install --no-cache-dir beets requests pylast pillow musicbrainzngs \
     && ln -s /opt/vynl-venv/bin/beet /usr/local/bin/beet \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
