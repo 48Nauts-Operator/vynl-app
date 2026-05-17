@@ -61,6 +61,11 @@ export function LLMSettingsPanel() {
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
+  // Available models fetched from the endpoint (for ollama/lmstudio/openrouter).
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+
   useEffect(() => {
     fetch("/api/llm/settings")
       .then((r) => r.json())
@@ -79,6 +84,42 @@ export function LLMSettingsPanel() {
   // Reset endpoint field placeholder when provider changes
   const placeholderEndpoint = defaults[provider] ?? "";
   const needsKey = NEEDS_API_KEY[provider];
+
+  // Auto-fetch model list when provider/endpoint stabilises (debounced).
+  // Anthropic skipped — no public list endpoint.
+  useEffect(() => {
+    if (provider === "anthropic") {
+      setAvailableModels([]);
+      setModelsError(null);
+      return;
+    }
+    const target = endpoint || defaults[provider] || "";
+    if (!target) return;
+    const handle = setTimeout(async () => {
+      setModelsLoading(true);
+      setModelsError(null);
+      try {
+        const res = await fetch("/api/llm/models", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider, endpoint: endpoint || null, apiKey: apiKey || undefined }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          setAvailableModels(data.models);
+        } else {
+          setAvailableModels([]);
+          setModelsError(data.error || "Failed to load models");
+        }
+      } catch (err) {
+        setAvailableModels([]);
+        setModelsError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setModelsLoading(false);
+      }
+    }, 600);
+    return () => clearTimeout(handle);
+  }, [provider, endpoint, apiKey, defaults]);
 
   const save = async () => {
     setSaving(true);
@@ -172,15 +213,42 @@ export function LLMSettingsPanel() {
           </div>
 
           <div>
-            <Label className="text-xs">Model</Label>
-            <Input
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder={MODEL_HINTS[provider]}
-            />
-            <p className="text-[10px] text-muted-foreground mt-1 truncate">
-              {MODEL_HINTS[provider]}
-            </p>
+            <Label className="text-xs flex items-center gap-1">
+              Model
+              {modelsLoading && <Loader2 className="h-3 w-3 animate-spin opacity-70" />}
+            </Label>
+            {provider !== "anthropic" && availableModels.length > 0 ? (
+              <>
+                <Select value={model} onValueChange={setModel}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pick a model…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableModels.map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {m}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-muted-foreground mt-1 truncate">
+                  {availableModels.length} model{availableModels.length === 1 ? "" : "s"} loaded from endpoint
+                </p>
+              </>
+            ) : (
+              <>
+                <Input
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder={MODEL_HINTS[provider]}
+                />
+                <p className="text-[10px] text-muted-foreground mt-1 truncate">
+                  {modelsError
+                    ? `Could not list models: ${modelsError.slice(0, 80)}`
+                    : MODEL_HINTS[provider]}
+                </p>
+              </>
+            )}
           </div>
         </div>
 

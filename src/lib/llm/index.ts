@@ -37,8 +37,39 @@ const DEFAULT_ENDPOINTS: Record<LLMProvider, string> = {
   anthropic: "https://api.anthropic.com",
   openrouter: "https://openrouter.ai/api/v1",
   ollama: "http://localhost:11434/v1",
-  lmstudio: "http://localhost:1234/v1",
+  // 192.168.74.179:1238 is the 48Nauts LM Studio instance on cand0riacstudio.
+  lmstudio: "http://192.168.74.179:1238/v1",
 };
+
+/** Fetch the model list from an OpenAI-compatible endpoint. Used by the
+ *  settings UI to populate a dropdown for ollama / lmstudio / openrouter. */
+export async function listModels(opts: {
+  provider: LLMProvider;
+  endpoint: string | null;
+  apiKey: string | null;
+}): Promise<{ ok: true; models: string[] } | { ok: false; error: string }> {
+  if (opts.provider === "anthropic") {
+    return {
+      ok: false,
+      error: "Anthropic doesn't expose a public model-list endpoint. Type the model name manually.",
+    };
+  }
+  const base = (opts.endpoint || DEFAULT_ENDPOINTS[opts.provider]).replace(/\/+$/, "");
+  const url = base.endsWith("/models") ? base : `${base}/models`;
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (opts.apiKey) headers.Authorization = `Bearer ${opts.apiKey}`;
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      return { ok: false, error: `HTTP ${res.status}: ${(await res.text()).slice(0, 200)}` };
+    }
+    const data = (await res.json()) as { data?: { id: string }[] };
+    const models = (data.data ?? []).map((m) => m.id).filter(Boolean).sort();
+    return { ok: true, models };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
 
 /** Resolve which provider is active. Env-var fallback for early bootstrap
  *  (e.g. first run before the user has visited /settings). */
