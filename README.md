@@ -189,7 +189,15 @@ Open [http://localhost:3101](http://localhost:3101)
 
 - **Node.js** 18+
 - **Beets** (`pip install beets`) for auto-tagging
-- **FFmpeg** for audio transcoding
+- **FFmpeg** — required for FLAC/WAV/AIFF playback on Sonos (Vynl
+  transcodes lossless formats to MP3 on the fly because Sonos's
+  built-in FLAC support is unreliable over UPnP). Without it, browser
+  playback still works for everything, but lossless tracks won't play
+  on Sonos speakers. Install:
+  - macOS: `brew install ffmpeg`
+  - Debian/Ubuntu: `sudo apt-get install ffmpeg`
+  - Windows: `choco install ffmpeg` or download from <https://ffmpeg.org/>
+  - **Docker users:** already bundled in the official image, nothing to do.
 - Optional: **Whisper** for podcast transcription
 - Optional: **Fabric** for AI podcast analysis
 
@@ -207,6 +215,8 @@ Open [http://localhost:3101](http://localhost:3101)
 | `SPOTIFY_CLIENT_ID` | Spotify integration | |
 | `SPOTIFY_CLIENT_SECRET` | Spotify integration | |
 | `SPOTIFY_REDIRECT_URI` | Spotify OAuth callback | `http://127.0.0.1:3101/api/spotify/callback` |
+| `SONOS_SEED_IP` | Optional Sonos discovery fallback when SSDP multicast is blocked | `192.168.1.42` |
+| `GH_STATS_PAT` | Optional GitHub PAT for the `/github-stats` page (Traffic API needs `Administration: read`) | `github_pat_…` |
 
 ## Architecture
 

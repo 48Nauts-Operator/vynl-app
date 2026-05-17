@@ -105,7 +105,15 @@ export async function GET(
     if (warmOnly && fs.existsSync(cachePath)) {
       return NextResponse.json({ ready: true });
     } else if (warmOnly) {
-      return NextResponse.json({ ready: false, error: "transcode failed" }, { status: 500 });
+      // Transcoding failed (most commonly because ffmpeg isn't installed
+      // — true on dev Macs without `brew install ffmpeg`). Return 200 so
+      // the client doesn't log a console error; the play-uri path will
+      // serve the original FLAC instead. Sonos may or may not handle it.
+      return NextResponse.json({
+        ready: false,
+        fallback: "original",
+        reason: "transcode unavailable (ffmpeg missing?)",
+      });
     }
 
     // Serve cached MP3 if it exists
