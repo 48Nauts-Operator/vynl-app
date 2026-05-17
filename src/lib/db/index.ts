@@ -320,6 +320,18 @@ sqlite.exec(`
     wikipedia_url TEXT,
     fetched_at TEXT DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS llm_settings (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+    provider TEXT NOT NULL DEFAULT 'anthropic',
+    model TEXT NOT NULL DEFAULT 'claude-sonnet-4-7',
+    endpoint TEXT,
+    api_key TEXT,
+    max_tokens INTEGER DEFAULT 4000,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+  INSERT OR IGNORE INTO llm_settings (id, provider, model)
+    VALUES (1, 'anthropic', 'claude-sonnet-4-7');
 `);
 
 // Migrations — add columns that may not exist in older databases

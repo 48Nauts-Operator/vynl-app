@@ -1,6 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
-
-const anthropic = new Anthropic();
+import { generateText } from "@/lib/llm";
 
 interface FeedbackItem {
   title: string;
@@ -24,9 +22,8 @@ export async function generateTasteProfile(
   feedback: FeedbackItem[],
   preferences?: { genres: string[]; moodLevel: number; tempoLevel: number; era: string }
 ): Promise<TasteProfileResult> {
-  const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
-    max_tokens: 1500,
+  const replyText = await generateText({
+    maxTokens: 1500,
     messages: [
       {
         role: "user",
@@ -57,7 +54,7 @@ Respond in JSON format:
   });
 
   const text =
-    message.content[0].type === "text" ? message.content[0].text : "";
+    replyText;
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error("Failed to parse taste profile response");
   return JSON.parse(jsonMatch[0]);
@@ -69,9 +66,8 @@ export async function getRecommendations(
   mood?: string,
   count = 10
 ): Promise<{ title: string; artist: string; reason: string }[]> {
-  const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
-    max_tokens: 1500,
+  const replyText = await generateText({
+    maxTokens: 1500,
     messages: [
       {
         role: "user",
@@ -90,7 +86,7 @@ Suggest ${count} tracks they would enjoy but likely don't know. Respond in JSON:
   });
 
   const text =
-    message.content[0].type === "text" ? message.content[0].text : "";
+    replyText;
   const jsonMatch = text.match(/\[[\s\S]*\]/);
   if (!jsonMatch) throw new Error("Failed to parse recommendations");
   return JSON.parse(jsonMatch[0]);
@@ -102,9 +98,8 @@ export async function generatePlaylist(
   mood: string,
   count = 20
 ): Promise<{ name: string; description: string; trackIds: number[] }> {
-  const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
-    max_tokens: 1500,
+  const replyText = await generateText({
+    maxTokens: 1500,
     messages: [
       {
         role: "user",
@@ -122,7 +117,7 @@ Select up to ${count} tracks and create a cohesive playlist. Respond in JSON:
   });
 
   const text =
-    message.content[0].type === "text" ? message.content[0].text : "";
+    replyText;
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error("Failed to parse playlist");
   return JSON.parse(jsonMatch[0]);
@@ -133,9 +128,8 @@ export async function generateCoverArtPrompt(
   trackTitles: string[],
   mood: string
 ): Promise<string> {
-  const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
-    max_tokens: 300,
+  const replyText = await generateText({
+    maxTokens: 300,
     messages: [
       {
         role: "user",
@@ -149,7 +143,7 @@ The prompt should describe a visually striking, abstract or artistic image suita
     ],
   });
 
-  return message.content[0].type === "text" ? message.content[0].text : "";
+  return replyText;
 }
 
 export async function generateCoverArt(prompt: string): Promise<string | null> {

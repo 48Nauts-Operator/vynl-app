@@ -1,9 +1,7 @@
 // [VynlDJ] — extractable: Core AI DJ set generation logic
 // This module handles catalog formatting and LLM-based set curation.
 
-import Anthropic from "@anthropic-ai/sdk";
-
-const anthropic = new Anthropic();
+import { generateText } from "@/lib/llm";
 
 // [VynlDJ] — extractable: DJ setup parameters
 export interface DjSetupParams {
@@ -605,19 +603,17 @@ export async function generateDjSet(
   const catalogPrompt = buildCatalogPrompt(catalog);
   const systemPrompt = buildDjSystemPrompt(params, catalog.length, catalog);
 
-  const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
-    max_tokens: 8000,
+  const text = await generateText({
+    maxTokens: 8000,
+    jsonMode: true,
     messages: [
+      { role: "system", content: systemPrompt },
       {
         role: "user",
         content: `Here is my music library catalog:\n\n${catalogPrompt}\n\nBuild me a DJ set following your rules.`,
       },
     ],
-    system: systemPrompt,
   });
-
-  const text = message.content[0].type === "text" ? message.content[0].text : "";
 
   // Extract JSON by finding balanced braces (greedy regex fails when LLM adds commentary with braces)
   const jsonStr = extractJsonObject(text);

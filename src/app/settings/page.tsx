@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { LLMSettingsPanel } from "@/components/settings/LLMSettingsPanel";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -769,6 +770,9 @@ export default function SettingsPage() {
           Configure your Vynl instance
         </p>
       </div>
+
+      {/* LLM Provider — used by album-analyze, discover, artist intel, DJ */}
+      <LLMSettingsPanel />
 
       {/* Developer Mode Toggle */}
       <div className="flex items-center justify-between py-2 px-1">

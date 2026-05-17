@@ -2,12 +2,10 @@
 // Estimates BPM, energy, danceability, key, and refined genre from song metadata
 // using Claude's knowledge of popular music. Designed for batch enrichment of entire libraries.
 
-import Anthropic from "@anthropic-ai/sdk";
+import { generateText } from "@/lib/llm";
 import { db } from "@/lib/db";
 import { tracks, trackAudioFeatures } from "@/lib/db/schema";
 import { notInArray } from "drizzle-orm";
-
-const anthropic = new Anthropic();
 
 // [VynlDJ] — extractable: Camelot wheel mapping for harmonic mixing
 const KEY_TO_CAMELOT: Record<string, string> = {
@@ -93,16 +91,13 @@ async function analyzeTrackBatch(batch: TrackInput[]): Promise<AnalysisResult[]>
 
   const input = `id|title|artist|album|genre|year\n${lines.join("\n")}`;
 
-  const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-5-20250929",
-    max_tokens: 4096,
+  const text = await generateText({
+    maxTokens: 4096,
+    jsonMode: true,
     messages: [
       {
-        role: "user",
-        content: `Analyze these ${batch.length} tracks. For each, provide your best estimate based on your knowledge of the artist, song, genre, and era.\n\n${input}\n\nRespond with ONLY a JSON array, no markdown fences.`,
-      },
-    ],
-    system: `You are a music analysis expert. For each track provided, estimate audio features based on your knowledge of the song, artist, and genre.
+        role: "system",
+        content: `You are a music analysis expert. For each track provided, estimate audio features based on your knowledge of the song, artist, and genre.
 
 Return a JSON array where each element has:
 - "id": the track ID from input (integer)
@@ -119,9 +114,13 @@ Rules:
 - Return ONLY the JSON array, no explanation or markdown fences
 - Every track in the input MUST appear in the output
 - Use null for fields you truly cannot estimate`,
+      },
+      {
+        role: "user",
+        content: `Analyze these ${batch.length} tracks. For each, provide your best estimate based on your knowledge of the artist, song, genre, and era.\n\n${input}\n\nRespond with ONLY a JSON array, no markdown fences.`,
+      },
+    ],
   });
-
-  const text = message.content[0].type === "text" ? message.content[0].text : "";
 
   // Parse JSON (may be wrapped in fences despite instruction)
   const jsonMatch = text.match(/\[[\s\S]*\]/);

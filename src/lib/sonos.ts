@@ -242,6 +242,24 @@ export async function status(speaker?: string): Promise<SonosStatus | null> {
   }
 }
 
+/**
+ * Helper: set the AVTransport URI with proper DIDL-Lite metadata so Sonos
+ * recognises the stream. SetAVTransportURI with empty metadata silently
+ * fails on most non-MP3 HTTP sources and on Spotify URIs.
+ */
+async function setUriWithMetadata(device: SonosDevice, uri: string): Promise<void> {
+  const guessed = MetadataHelper.GuessMetaDataAndTrackUri(uri);
+  const metadataXml =
+    typeof guessed.metadata === "string"
+      ? guessed.metadata
+      : MetadataHelper.TrackToMetaData(guessed.metadata, true);
+  await device.AVTransportService.SetAVTransportURI({
+    InstanceID: 0,
+    CurrentURI: guessed.trackUri || uri,
+    CurrentURIMetaData: metadataXml || "",
+  });
+}
+
 export async function playUri(
   speaker: string,
   uri: string,
@@ -254,7 +272,7 @@ export async function playUri(
   if (isRadio && /^https?:\/\//i.test(uri)) {
     finalUri = `x-rincon-mp3radio://${uri.replace(/^https?:\/\//i, "")}`;
   }
-  await device.SetAVTransportURI(finalUri);
+  await setUriWithMetadata(device, finalUri);
   await device.Play();
 }
 
@@ -263,13 +281,11 @@ export async function openSpotify(
   spotifyUri: string
 ): Promise<void> {
   const device = await getDeviceByName(speaker);
-  // Spotify URIs (spotify:track:..., spotify:album:..., spotify:playlist:...)
-  // become Sonos URIs once URL-encoded. SetAVTransportURI handles the metadata
-  // lookup via the linked Spotify account on the household.
-  const sonosUri = spotifyUri.startsWith("x-")
-    ? spotifyUri
-    : `x-sonos-spotify:${encodeURIComponent(spotifyUri)}?sid=9&flags=8224&sn=1`;
-  await device.SetAVTransportURI(sonosUri);
+  // GuessMetaDataAndTrackUri rewrites spotify:track:* / spotify:album:* /
+  // spotify:playlist:* into the proper x-sonos-spotify:* form and produces
+  // the DIDL metadata Sonos needs to call into the household's linked
+  // Spotify account. Falls through unchanged for already-x-* URIs.
+  await setUriWithMetadata(device, spotifyUri);
   await device.Play();
 }
 

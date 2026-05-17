@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
-import Anthropic from "@anthropic-ai/sdk";
+import { generateText, getActiveSettings } from "@/lib/llm";
 
 interface AlbumRow {
   album: string;
@@ -234,9 +234,13 @@ async function runAnalysis() {
       return;
     }
 
-    // Check API key
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
+    // Check the configured LLM has what it needs (API key for paid providers,
+    // endpoint for local ones). If misconfigured, return the heuristic groups
+    // alone and tell the user to fix it in Settings.
+    const llm = getActiveSettings();
+    const needsKey = llm.provider === "anthropic" || llm.provider === "openrouter";
+    const missing = (needsKey && !llm.apiKey) || (!needsKey && !llm.endpoint);
+    if (missing) {
       job.suggestions = similarGroups.map((g) => ({
         albums: g.albums,
         reason: g.reason,
@@ -245,16 +249,14 @@ async function runAnalysis() {
       }));
       job.status = "complete";
       job.phase = "done";
-      job.message = `Found ${similarGroups.length} potential groups (AI analysis unavailable — no API key)`;
+      job.message = `Found ${similarGroups.length} potential groups (AI analysis unavailable — configure LLM in Settings)`;
       job.completedAt = Date.now();
       return;
     }
 
     // Phase 3: AI analysis
     job.phase = "ai_analyzing";
-    job.phaseDetail = `Sending ${similarGroups.length} groups to AI...`;
-
-    const client = new Anthropic({ apiKey });
+    job.phaseDetail = `Sending ${similarGroups.length} groups to ${llm.provider}/${llm.model}...`;
 
     const groupsSummary = similarGroups
       .map(
@@ -265,9 +267,9 @@ async function runAnalysis() {
       )
       .join("\n\n");
 
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-5-20250929",
-      max_tokens: 4000,
+    const replyText = await generateText({
+      maxTokens: 4000,
+      jsonMode: true,
       messages: [
         {
           role: "user",
@@ -318,8 +320,7 @@ Rules:
     // Parse AI response
     let aiSuggestions: any[] = [];
     try {
-      const text = response.content[0].type === "text" ? response.content[0].text : "";
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      const jsonMatch = replyText.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
         aiSuggestions = JSON.parse(jsonMatch[0]);
       }

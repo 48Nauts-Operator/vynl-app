@@ -406,3 +406,19 @@ export const artistIntel = sqliteTable("artist_intel", {
 
 export type ArtistIntel = typeof artistIntel.$inferSelect;
 export type NewArtistIntel = typeof artistIntel.$inferInsert;
+
+// ---------- LLM Provider Settings ----------
+
+// Singleton config row (id=1) for which LLM provider Vynl uses across
+// album-analyze, discover/samples, artist intelligence, DJ, etc.
+export const llmSettings = sqliteTable("llm_settings", {
+  id: integer("id").primaryKey().default(1),
+  provider: text("provider").notNull().default("anthropic"), // "anthropic" | "openrouter" | "ollama" | "lmstudio"
+  model: text("model").notNull().default("claude-sonnet-4-7"),
+  endpoint: text("endpoint"),         // base URL — only used for ollama / lmstudio / openrouter overrides
+  apiKey: text("api_key"),            // null for ollama / lmstudio (typically no auth)
+  maxTokens: integer("max_tokens").default(4000),
+  updatedAt: text("updated_at").default(sql`(datetime('now'))`),
+});
+
+export type LLMSettings = typeof llmSettings.$inferSelect;
