@@ -186,17 +186,23 @@ async function runAnalysis() {
     job.phaseDetail = "Reading library...";
 
     const sqlite = (db as any).session?.client || (db as any).$client;
+    // Group by (album, album_artist) — mirrors the /api/albums display layer,
+    // so the analyzer sees the same duplicate rows the user sees. Grouping
+    // by album alone collapses artist-variants (e.g. featured-artist splits
+    // like "Ignite" with two different album_artist values) before we can
+    // detect them.
     const albums: AlbumRow[] = sqlite
       .prepare(
         `SELECT album,
                 COALESCE(album_artist, artist) as album_artist,
                 COUNT(*) as track_count,
                 COUNT(DISTINCT artist) as distinct_artists,
-                year, cover_path
+                MIN(year) as year,
+                MIN(cover_path) as cover_path
          FROM tracks
          WHERE source = 'local' AND album != 'Unknown Album' AND album != ''
-         GROUP BY album
-         ORDER BY album ASC`
+         GROUP BY album, COALESCE(album_artist, artist)
+         ORDER BY album ASC, album_artist ASC`
       )
       .all();
 

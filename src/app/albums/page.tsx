@@ -24,6 +24,7 @@ import { usePlayerStore } from "@/store/player";
 import { Disc3, Play, Loader2, ImageIcon, Pencil, LayoutGrid, List, Archive, ListPlus, Search, X } from "lucide-react";
 import { motion } from "framer-motion";
 import { CoverSearchDialog } from "@/components/albums/CoverSearchDialog";
+import { GenreFilter } from "@/components/GenreFilter";
 import { AddToPlaylistDialog } from "@/components/playlists/AddToPlaylistDialog";
 import { AlphabetSidebar } from "@/components/albums/AlphabetSidebar";
 
@@ -229,19 +230,7 @@ export default function AlbumsPage() {
               </button>
             )}
           </div>
-          <Select value={genre || "all"} onValueChange={(v) => setGenre(v === "all" ? null : v)}>
-            <SelectTrigger className="w-[160px]">
-              <SelectValue placeholder="All genres" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All genres</SelectItem>
-              {genres.map((g) => (
-                <SelectItem key={g} value={g}>
-                  {g}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <GenreFilter genres={genres} value={genre} onChange={setGenre} />
           <Select value={sort} onValueChange={setSort}>
             <SelectTrigger className="w-[160px]">
               <SelectValue />

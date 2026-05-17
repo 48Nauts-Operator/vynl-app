@@ -16,6 +16,7 @@ import {
 import { Mic2, Search, Loader2, LayoutGrid, List, X } from "lucide-react";
 import { motion } from "framer-motion";
 import { AlphabetSidebar } from "@/components/albums/AlphabetSidebar";
+import { GenreFilter } from "@/components/GenreFilter";
 
 interface Artist {
   name: string;
@@ -151,19 +152,7 @@ export default function ArtistsPage() {
               </button>
             )}
           </div>
-          <Select value={genre || "all"} onValueChange={(v) => setGenre(v === "all" ? null : v)}>
-            <SelectTrigger className="w-[160px]">
-              <SelectValue placeholder="All genres" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All genres</SelectItem>
-              {allGenres.map((g) => (
-                <SelectItem key={g} value={g}>
-                  {g}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <GenreFilter genres={allGenres} value={genre} onChange={setGenre} />
           <div className="flex border border-border rounded-md">
             <Button
               variant={viewMode === "grid" ? "secondary" : "ghost"}
