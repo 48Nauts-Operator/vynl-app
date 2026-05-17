@@ -5,6 +5,7 @@ import { sql } from "drizzle-orm";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
+import { spawn } from "child_process";
 import { parseFile } from "music-metadata";
 
 const MAX_LOG_LINES = 500;
@@ -294,6 +295,77 @@ async function runFetchArtwork() {
   log(`${found} downloaded, ${embedded} extracted from files, ${notFound} not found, ${errors} errors`);
 }
 
+// ── Refresh Genres (beet lastgenre) ──
+
+async function runRefreshGenres() {
+  const job = g.job;
+  if (!job) return;
+
+  log("Running `beet lastgenre -f` — re-fetches canonical genres from Last.fm for every album.");
+  log("This can take 10–30 min on a large library (Last.fm rate-limits ~1 req/sec).");
+  log("");
+
+  return new Promise<void>((resolve) => {
+    const proc = spawn("beet", ["lastgenre", "-f"], { env: process.env });
+    let updated = 0;
+    let errors = 0;
+
+    const consumeLine = (line: string) => {
+      if (!line.trim()) return;
+      log(line);
+      if (line.startsWith("lastgenre:")) {
+        updated++;
+        job.current = updated;
+      }
+      if (/error|fail/i.test(line)) errors++;
+    };
+
+    let stdoutBuf = "";
+    proc.stdout.on("data", (chunk: Buffer) => {
+      stdoutBuf += chunk.toString();
+      const lines = stdoutBuf.split("\n");
+      stdoutBuf = lines.pop() || "";
+      for (const ln of lines) consumeLine(ln);
+    });
+
+    let stderrBuf = "";
+    proc.stderr.on("data", (chunk: Buffer) => {
+      stderrBuf += chunk.toString();
+      const lines = stderrBuf.split("\n");
+      stderrBuf = lines.pop() || "";
+      for (const ln of lines) consumeLine(ln);
+    });
+
+    proc.on("error", (err) => {
+      log(`✗ Failed to launch beet: ${err.message}`);
+      log("Is the beets CLI installed in this container? Flight Check in /settings will tell you.");
+      job.result = { updated: 0, errors: 1, total: 0 };
+      resolve();
+    });
+
+    proc.on("close", (code) => {
+      if (stdoutBuf) consumeLine(stdoutBuf);
+      if (stderrBuf) consumeLine(stderrBuf);
+      log("");
+      log(`━━━ ${code === 0 ? "COMPLETE" : `EXITED with code ${code}`} ━━━`);
+      log(`${updated} albums updated, ${errors} errors`);
+      log("");
+      log("Tip: run a library scan now so Vynl picks up the new genres in its DB.");
+      job.result = { updated, errors, total: updated };
+      resolve();
+    });
+
+    // Honour user cancellation
+    const cancelWatcher = setInterval(() => {
+      if (job.status === "cancelled") {
+        proc.kill("SIGTERM");
+        clearInterval(cancelWatcher);
+      }
+    }, 1000);
+    proc.on("close", () => clearInterval(cancelWatcher));
+  });
+}
+
 // ── Main background runner ──
 
 async function runHousekeepingJob() {
@@ -310,6 +382,9 @@ async function runHousekeepingJob() {
         break;
       case "fetch-artwork":
         await runFetchArtwork();
+        break;
+      case "refresh-genres":
+        await runRefreshGenres();
         break;
     }
 
@@ -332,7 +407,7 @@ async function runHousekeepingJob() {
 
 // ── HTTP handlers ──
 
-const VALID_ACTIONS = ["clean-missing", "refresh-metadata", "fetch-artwork"];
+const VALID_ACTIONS = ["clean-missing", "refresh-metadata", "fetch-artwork", "refresh-genres"];
 
 export async function POST(request: NextRequest) {
   const job = g.job;

@@ -34,6 +34,7 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
+  Tag,
 } from "lucide-react";
 import Image from "next/image";
 import { motion } from "framer-motion";
@@ -807,6 +808,12 @@ const HOUSEKEEPING_ACTIONS = [
     label: "Fetch Artwork",
     desc: "Search iTunes and extract embedded art for albums missing covers.",
     icon: ImageIcon,
+  },
+  {
+    id: "refresh-genres",
+    label: "Re-fetch Genres",
+    desc: "Run beets `lastgenre` to pull canonical genres from Last.fm for every album. Overwrites existing genres. ~1 album/sec; run a library scan afterwards.",
+    icon: Tag,
   },
 ];
 

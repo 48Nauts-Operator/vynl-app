@@ -240,6 +240,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
+
       case "rescan-covers": {
         const allTracks = db.select().from(tracks).all();
         const coversDir = path.join(process.cwd(), "public", "covers");
@@ -448,7 +449,7 @@ export async function POST(request: NextRequest) {
 
       default:
         return NextResponse.json(
-          { error: `Unknown action: ${action}. Use: clean-missing, refresh-metadata, fetch-artwork, rescan-covers, merge-split-album, merge-all-split-albums, detect-duplicate-formats, clean-duplicate-formats` },
+          { error: `Unknown action: ${action}. Use: clean-missing, refresh-metadata, fetch-artwork, rescan-covers, merge-split-album, merge-all-split-albums, detect-duplicate-formats, clean-duplicate-formats. (refresh-genres lives on /api/library/housekeeping/job for streaming logs.)` },
           { status: 400 }
         );
     }

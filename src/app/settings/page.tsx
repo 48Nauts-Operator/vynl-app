@@ -2148,6 +2148,9 @@ export default function SettingsPage() {
           {coverStatus && (
             <p className="text-sm text-muted-foreground mt-2">{coverStatus}</p>
           )}
+          <p className="text-xs text-muted-foreground mt-3">
+            Tip: re-fetch genres from Last.fm via the <strong>Library → Housekeeping → Re-fetch Genres</strong> action.
+          </p>
         </CardContent>
         )}
       </Card>
