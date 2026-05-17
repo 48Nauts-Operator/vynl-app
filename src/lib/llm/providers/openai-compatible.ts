@@ -38,8 +38,12 @@ export async function callOpenAICompatible(
   };
   if (opts.temperature !== undefined) body.temperature = opts.temperature;
   if (opts.jsonMode) {
-    // OpenRouter & LM Studio honour response_format; Ollama ignores it.
-    body.response_format = { type: "json_object" };
+    // response_format is finicky across providers: OpenRouter accepts
+    // {type: "json_object"}, LM Studio only accepts "text" or "json_schema",
+    // older Ollama ignores it. Rather than per-provider gymnastics we rely
+    // on the prompt's "Return ONLY JSON" instructions, which all modern
+    // models honour. If we ever need hard enforcement, switch to
+    // json_schema with an explicit Zod-generated schema per call site.
   }
 
   const res = await fetch(url, {
