@@ -5,6 +5,9 @@ import Image from "next/image";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { motion } from "framer-motion";
+import packageJson from "../../../package.json";
+
+const APP_VERSION = packageJson.version;
 
 export default function AboutPage() {
   const container = {
@@ -49,7 +52,7 @@ export default function AboutPage() {
       <motion.div variants={item}>
         <Card>
           <CardContent className="py-5 space-y-3">
-            <Row label="Version" value="0.1.0" />
+            <Row label="Version" value={APP_VERSION} />
             <Separator />
             <Row label="Build" value="Next.js 15 + React 19" />
             <Separator />
