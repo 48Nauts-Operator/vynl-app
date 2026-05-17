@@ -246,16 +246,29 @@ export async function status(speaker?: string): Promise<SonosStatus | null> {
  * Helper: set the AVTransport URI with proper DIDL-Lite metadata so Sonos
  * recognises the stream. SetAVTransportURI with empty metadata silently
  * fails on most non-MP3 HTTP sources and on Spotify URIs.
+ *
+ * The library's xml-helper.EncodeTrackUri() runs encodeURI() on any HTTP
+ * URI inside the SOAP body. If we hand it a URI that's already URL-encoded
+ * (Vynl always sends %20 for spaces, etc.), the result is double-encoded
+ * (%20 -> %2520) and Sonos 404s on the file lookup. Decode once first.
  */
 async function setUriWithMetadata(device: SonosDevice, uri: string): Promise<void> {
-  const guessed = MetadataHelper.GuessMetaDataAndTrackUri(uri);
+  let normalisedUri = uri;
+  if (uri.startsWith("http")) {
+    try {
+      normalisedUri = decodeURI(uri);
+    } catch {
+      // Malformed encoding — fall through with the original.
+    }
+  }
+  const guessed = MetadataHelper.GuessMetaDataAndTrackUri(normalisedUri);
   const metadataXml =
     typeof guessed.metadata === "string"
       ? guessed.metadata
       : MetadataHelper.TrackToMetaData(guessed.metadata, true);
   await device.AVTransportService.SetAVTransportURI({
     InstanceID: 0,
-    CurrentURI: guessed.trackUri || uri,
+    CurrentURI: guessed.trackUri || normalisedUri,
     CurrentURIMetaData: metadataXml || "",
   });
 }
