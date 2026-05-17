@@ -478,22 +478,49 @@ async function runBeetsDoctor() {
   }
 
   async function consultLLM(prompt: string): Promise<LLMVerdict | null> {
-    try {
-      const text = await generateText({
-        maxTokens: 600,
-        jsonMode: true,
-        messages: [{ role: "user", content: prompt }],
-      });
-      const match = text.match(/\{[\s\S]*\}/);
-      if (!match) return null;
-      const parsed = JSON.parse(match[0]) as LLMVerdict;
-      // Clamp and normalize
-      parsed.confidence = Math.max(0, Math.min(1, Number(parsed.confidence) || 0));
-      return parsed;
-    } catch (err) {
-      log(`  LLM call failed: ${err}`);
-      return null;
+    // Some open-weight models drift after a string of similar prompts and
+    // start returning non-JSON tokens (we saw qwen3.5 mix Chinese chars
+    // into the middle of a JSON value, gemma do the same). One retry
+    // with a curt "JSON ONLY" reminder almost always recovers.
+    const attempt = async (variant: 0 | 1): Promise<LLMVerdict | null> => {
+      const messages =
+        variant === 0
+          ? [{ role: "user" as const, content: prompt }]
+          : [
+              {
+                role: "system" as const,
+                content:
+                  "You must respond with a single valid JSON object only. No prose, no markdown, no commentary. Start with { and end with }.",
+              },
+              { role: "user" as const, content: prompt },
+            ];
+      try {
+        const text = await generateText({
+          maxTokens: 600,
+          jsonMode: true,
+          messages,
+        });
+        const match = text.match(/\{[\s\S]*\}/);
+        if (!match) return null;
+        const parsed = JSON.parse(match[0]) as LLMVerdict;
+        parsed.confidence = Math.max(
+          0,
+          Math.min(1, Number(parsed.confidence) || 0)
+        );
+        return parsed;
+      } catch {
+        return null;
+      }
+    };
+
+    const first = await attempt(0);
+    if (first) return first;
+    const retry = await attempt(1);
+    if (retry) {
+      log(`  ↻ recovered on retry`);
+      return retry;
     }
+    return null;
   }
 
   // ── Pass 1: Unflagged compilation candidates ──

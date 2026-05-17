@@ -57,6 +57,8 @@ export function DoctorTab() {
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [actingOnId, setActingOnId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkActing, setBulkActing] = useState(false);
 
   // Plan mode = scan + LLM + queue, NO beets writes. Default ON in dev
   // environments to keep local testing safe (the beets DB on Mac is
@@ -82,16 +84,62 @@ export function DoctorTab() {
     loadReviews();
   }, [loadReviews]);
 
-  // Poll the housekeeping job when running
+  // On mount: check if a beets-doctor job is already running (e.g. user
+  // navigated away and came back). If so, replay the existing log buffer
+  // and resume polling.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/library/housekeeping/job?since=0", {
+          cache: "no-store",
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        if (data.action !== "beets-doctor") return;
+        if (data.status === "running") {
+          setLogs(data.logs || []);
+          setLogOffset(data.totalLogs ?? (data.logs || []).length);
+          setJob({
+            status: data.status,
+            total: data.total,
+            current: data.current,
+            result: data.result,
+          });
+          setRunning(true);
+        } else if (data.status === "complete" && data.logs?.length) {
+          // Show the last completed scan's output as a record
+          setLogs(data.logs);
+          setLogOffset(data.totalLogs ?? data.logs.length);
+          setJob({
+            status: data.status,
+            total: data.total,
+            current: data.current,
+            result: data.result,
+          });
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Poll the housekeeping job + the review queue while running. The
+  // queue poll runs at a slower cadence (every 3 ticks) so we don't
+  // hammer the DB during long scans.
   useEffect(() => {
     if (!running) return;
     let currentOffset = logOffset;
+    let tick = 0;
     const interval = setInterval(async () => {
+      tick++;
       try {
         const res = await fetch(`/api/library/housekeeping/job?since=${currentOffset}`);
         const data = await res.json();
         if (data.action && data.action !== "beets-doctor") {
-          // Some other job is running — ignore
           return;
         }
         if (data.logs && data.logs.length > 0) {
@@ -110,7 +158,12 @@ export function DoctorTab() {
           loadReviews();
         }
       } catch {
-        // ignore poll errors
+        /* ignore poll errors */
+      }
+      // Refresh the review queue periodically so the badge ticks up
+      // live while findings are inserted.
+      if (tick % 4 === 0) {
+        loadReviews();
       }
     }, 1500);
     return () => clearInterval(interval);
@@ -157,6 +210,44 @@ export function DoctorTab() {
       await loadReviews();
     } finally {
       setActingOnId(null);
+    }
+  };
+
+  const toggleSelected = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllVisible = () => {
+    setSelectedIds(new Set(reviews.map((r) => r.id)));
+  };
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const bulkAct = async (action: "accept" | "dismiss") => {
+    if (selectedIds.size === 0) return;
+    setBulkActing(true);
+    const ids = Array.from(selectedIds);
+    try {
+      // Issue them in parallel — server is fine with concurrent
+      // single-row updates; if a beet apply fails on one it just stays
+      // pending and the next loadReviews() reveals what's left.
+      await Promise.all(
+        ids.map((id) =>
+          fetch(`/api/beetsai/review/${id}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action }),
+          }).catch(() => null)
+        )
+      );
+      setSelectedIds(new Set());
+      await loadReviews();
+    } finally {
+      setBulkActing(false);
     }
   };
 
@@ -267,18 +358,86 @@ export function DoctorTab() {
             </p>
           ) : (
             <div className="space-y-4">
-              {Object.entries(grouped).map(([issueType, items]) => (
+              {/* Bulk action bar */}
+              <div className="flex items-center gap-2 flex-wrap text-xs">
+                <button
+                  type="button"
+                  onClick={
+                    selectedIds.size === reviews.length
+                      ? clearSelection
+                      : selectAllVisible
+                  }
+                  className="underline-offset-2 hover:underline text-muted-foreground"
+                >
+                  {selectedIds.size === reviews.length ? "Clear all" : `Select all ${reviews.length}`}
+                </button>
+                {selectedIds.size > 0 && (
+                  <>
+                    <span className="text-muted-foreground">·</span>
+                    <span>{selectedIds.size} selected</span>
+                    <Button
+                      size="sm"
+                      onClick={() => bulkAct("accept")}
+                      disabled={bulkActing}
+                    >
+                      {bulkActing ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                      ) : (
+                        <CheckCircle className="h-3.5 w-3.5 mr-1" />
+                      )}
+                      Approve {selectedIds.size}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => bulkAct("dismiss")}
+                      disabled={bulkActing}
+                    >
+                      <XCircle className="h-3.5 w-3.5 mr-1" />
+                      Dismiss {selectedIds.size}
+                    </Button>
+                  </>
+                )}
+              </div>
+
+              {Object.entries(grouped).map(([issueType, items]) => {
+                const groupIds = items.map((i) => i.id);
+                const allSelected = groupIds.every((id) => selectedIds.has(id));
+                return (
                 <div key={issueType}>
-                  <h4 className="text-xs uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1">
-                    {ISSUE_ICONS[issueType]} {issueType} ({items.length})
-                  </h4>
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                      {ISSUE_ICONS[issueType]} {issueType} ({items.length})
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSelectedIds((prev) => {
+                          const next = new Set(prev);
+                          if (allSelected) groupIds.forEach((id) => next.delete(id));
+                          else groupIds.forEach((id) => next.add(id));
+                          return next;
+                        })
+                      }
+                      className="text-[10px] underline-offset-2 hover:underline text-muted-foreground"
+                    >
+                      {allSelected ? "Deselect group" : "Select group"}
+                    </button>
+                  </div>
                   <div className="space-y-2">
                     {items.map((r) => (
                       <div
                         key={r.id}
-                        className="border border-border rounded-md p-3 text-sm"
+                        className={`border border-border rounded-md p-3 text-sm ${selectedIds.has(r.id) ? "bg-accent/40" : ""}`}
                       >
-                        <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-2">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(r.id)}
+                            onChange={() => toggleSelected(r.id)}
+                            className="mt-1 cursor-pointer"
+                          />
+                          <div className="flex items-start justify-between gap-3 flex-1 min-w-0">
                           <div className="min-w-0 flex-1">
                             <p className="font-medium truncate">{r.albumName}</p>
                             {r.albumArtist && (
@@ -327,12 +486,14 @@ export function DoctorTab() {
                               </Button>
                             </div>
                           </div>
+                          </div>
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>
