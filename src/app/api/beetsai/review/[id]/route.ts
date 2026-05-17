@@ -52,6 +52,25 @@ export async function POST(
   const llm = getActiveSettings();
   const args = row.proposedArgs ? (JSON.parse(row.proposedArgs) as string[]) : [];
 
+  // If the item was queued in plan mode, accept = "I would accept this if
+  // it were real" — just resolve the row without running any beet command.
+  // Useful for testing the review workflow on a Mac where beet isn't
+  // installed (or against a shared library DB you don't want to write to).
+  const context = row.context ? JSON.parse(row.context) : {};
+  if (context.planMode === true) {
+    db.update(beetsaiReview)
+      .set({ status: "accepted", resolvedAt: new Date().toISOString() })
+      .where(eq(beetsaiReview.id, id))
+      .run();
+    return NextResponse.json({
+      accepted: true,
+      planMode: true,
+      appliedCount: 0,
+      failedCount: 0,
+      note: "Plan-mode item — marked accepted without running beet.",
+    });
+  }
+
   let applyResults: Array<{
     success: boolean;
     before?: Record<string, unknown>;
