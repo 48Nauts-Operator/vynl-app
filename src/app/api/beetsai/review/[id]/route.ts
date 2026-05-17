@@ -71,7 +71,7 @@ export async function POST(
     });
   }
 
-  let applyResults: Array<{
+  const applyResults: Array<{
     success: boolean;
     before?: Record<string, unknown>;
     after?: Record<string, unknown>;

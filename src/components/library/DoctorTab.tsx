@@ -354,7 +354,7 @@ export function DoctorTab() {
         <CardContent>
           {reviews.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No items waiting for review. Run a scan and the LLM will queue anything it's not 100% sure about.
+              No items waiting for review. Run a scan and the LLM will queue anything it&apos;s not 100% sure about.
             </p>
           ) : (
             <div className="space-y-4">
