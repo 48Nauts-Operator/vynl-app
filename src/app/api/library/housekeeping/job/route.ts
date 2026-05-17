@@ -52,7 +52,7 @@ async function runCleanMissing() {
   job.total = allTracks.length;
   let removed = 0;
 
-  log(`Checking ${allTracks.length} tracks for missing files...`);
+  log(`Checking ${allTracks.length} Vynl tracks for missing files...`);
   log("");
 
   for (let i = 0; i < allTracks.length; i++) {
@@ -75,10 +75,77 @@ async function runCleanMissing() {
     }
   }
 
-  job.result = { removed, total: allTracks.length };
+  log("");
+  log(`Vynl DB: removed ${removed} of ${allTracks.length} tracks`);
+
+  // Also clean orphans from the beets DB so the next `beet lastgenre` /
+  // `beet update` run isn't flooded with read errors. Vynl's DB and
+  // beets' DB are separate, and Vynl previously only touched its own.
+  let beetsRemoved = 0;
+  let beetsTotal = 0;
+  try {
+    log("");
+    log("Cleaning orphans from beets DB...");
+    const beetsCleanup = await runBeetsCleanMissing();
+    beetsRemoved = beetsCleanup.removed;
+    beetsTotal = beetsCleanup.total;
+    log(`Beets DB: removed ${beetsRemoved} of ${beetsTotal} items`);
+  } catch (err) {
+    log(`\u26a0 Beets cleanup skipped: ${err}`);
+  }
+
+  job.result = {
+    removed,
+    total: allTracks.length,
+    beetsRemoved,
+    beetsTotal,
+  };
   log("");
   log(`\u2501\u2501\u2501 COMPLETE \u2501\u2501\u2501`);
-  log(`Removed ${removed} of ${allTracks.length} total tracks`);
+  log(
+    `Removed ${removed} Vynl tracks + ${beetsRemoved} beets items.`
+  );
+}
+
+/**
+ * Bulk-remove orphan items from the beets library DB. Runs a tiny Python
+ * helper inside the same process container so beets' library API can
+ * batch the deletes (~100x faster than spawning `beet rm` per item).
+ */
+async function runBeetsCleanMissing(): Promise<{ removed: number; total: number }> {
+  return new Promise((resolve, reject) => {
+    const script = `
+import os
+from beets.library import Library
+lib = Library("/music/library.db")
+items = list(lib.items())
+total = len(items)
+removed = 0
+for it in items:
+    p = it.path.decode("utf-8", "replace") if isinstance(it.path, bytes) else it.path
+    if not os.path.exists(p):
+        it.remove(delete=False)
+        removed += 1
+print(f"{removed} {total}")
+`;
+    const proc = spawn("/opt/vynl-venv/bin/python3", ["-c", script]);
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (c: Buffer) => (stdout += c.toString()));
+    proc.stderr.on("data", (c: Buffer) => (stderr += c.toString()));
+    proc.on("error", (e) => reject(e));
+    proc.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || `python exited with code ${code}`));
+        return;
+      }
+      const [removedStr, totalStr] = stdout.trim().split(/\s+/);
+      resolve({
+        removed: parseInt(removedStr) || 0,
+        total: parseInt(totalStr) || 0,
+      });
+    });
+  });
 }
 
 async function runRefreshMetadata() {
