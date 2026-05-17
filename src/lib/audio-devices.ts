@@ -1,8 +1,18 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { existsSync } from "fs";
 
 const execFileAsync = promisify(execFile);
 const SWITCH_AUDIO = "/opt/homebrew/bin/SwitchAudioSource";
+
+// Only macOS Homebrew installs this binary. In Linux/Docker (NAS), CI,
+// or any Mac without the brew package, it's absent. Cache the presence
+// check so we don't stat the disk on every request.
+let switchAudioAvailable: boolean | null = null;
+function isSwitchAudioAvailable(): boolean {
+  if (switchAudioAvailable === null) switchAudioAvailable = existsSync(SWITCH_AUDIO);
+  return switchAudioAvailable;
+}
 
 export type DeviceType = "bluetooth" | "builtin" | "monitor" | "virtual" | "airplay" | "other";
 
@@ -43,6 +53,8 @@ async function switchAudioExec(args: string[]): Promise<string> {
 }
 
 export async function listOutputDevices(): Promise<AudioDevice[]> {
+  if (!isSwitchAudioAvailable()) return [];
+
   const [deviceList, current] = await Promise.all([
     switchAudioExec(["-a", "-t", "output"]),
     switchAudioExec(["-c", "-t", "output"]),
@@ -63,9 +75,13 @@ export async function listOutputDevices(): Promise<AudioDevice[]> {
 }
 
 export async function getCurrentDevice(): Promise<string> {
+  if (!isSwitchAudioAvailable()) return "";
   return switchAudioExec(["-c", "-t", "output"]);
 }
 
 export async function switchDevice(name: string): Promise<void> {
+  if (!isSwitchAudioAvailable()) {
+    throw new Error("System audio device switching is only available on macOS with SwitchAudioSource installed.");
+  }
   await switchAudioExec(["-s", name, "-t", "output"]);
 }
