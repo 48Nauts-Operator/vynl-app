@@ -10,17 +10,20 @@ services:
     # listens on port 3101.
     network_mode: host
     volumes:
-      - /volume1/Music/library:/music/library:ro
-      - /volume1/Music/library.db:/music/library.db
-      - /volume1/Music/podcasts:/music/podcasts
+      # Single mount for the whole Music share. Was previously three separate
+      # bind mounts (library, library.db, podcasts) but that left /music/
+      # itself owned by root inside the container, so SQLite couldn't create
+      # its journal/WAL files next to library.db ("attempt to write a
+      # readonly database"). Mounting the parent directory gives the
+      # container the host's rwxrwxrwx on /volume1/Music.
+      - /volume1/Music:/music
       # Persistent app data (survives container restarts)
       - vynl-data:/app/data
       - vynl-covers:/app/public/covers
-      # Beets config — must be a bind mount so changes (plugin list, etc.)
-      # land in the container without rebuilding. Co-located with the
-      # music library to avoid needing a separate /volume1/docker/vynl
-      # folder. Source of truth in the repo is beets-config.example.yaml;
-      # copy/rename it to /volume1/Music/beets-config.yaml on the NAS.
+      # Beets config — bind-mounted so plugin/path edits land in the
+      # container without rebuilding. Source of truth in the repo is
+      # beets-config.example.yaml; copy/rename it to
+      # /volume1/Music/beets-config.yaml on the NAS.
       - /volume1/Music/beets-config.yaml:/home/vynl/.config/beets/config.yaml:ro
     environment:
       - MUSIC_LIBRARY_PATH=/music/library
