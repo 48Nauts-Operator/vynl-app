@@ -120,6 +120,30 @@ export async function applyModify(
   };
 }
 
+/** Delete an item from the beets DB. `-d` would also delete the file —
+ *  we deliberately omit it here so source files are never touched.
+ *  Used by junk-cleanup for orphan/broken entries.
+ *  args expected: ["remove", "-y", "id:NNN"]  (the -d flag must NOT be there.) */
+export async function applyRemove(args: string[]): Promise<ApplyResult> {
+  if (args[0] !== "remove") {
+    return { success: false, error: `applyRemove expects remove, got: ${args[0]}` };
+  }
+  // Safety: strip -d / --delete if the LLM included it. We only ever
+  // remove from beets DB; never from disk.
+  const safeArgs = args.filter((a) => a !== "-d" && a !== "--delete");
+  const result = await runBeet(safeArgs);
+  return {
+    success: result.exitCode === 0,
+    stdout: result.stdout.slice(-2000),
+    stderr: result.stderr.slice(-1000),
+    exitCode: result.exitCode,
+    error:
+      result.exitCode === 0
+        ? undefined
+        : `beet remove exited with code ${result.exitCode}`,
+  };
+}
+
 /** Push beets DB values out to the file tags. Run after any modify that
  *  changed user-visible metadata so source files reflect the change. */
 export async function applyWrite(query: string): Promise<ApplyResult> {

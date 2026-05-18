@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { beetsaiActions, beetsaiReview } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { applyModify, applyWrite } from "@/lib/beets-doctor/apply";
+import { applyModify, applyWrite, applyRemove } from "@/lib/beets-doctor/apply";
 import { getActiveSettings } from "@/lib/llm";
 
 // POST /api/beetsai/review/[id]
@@ -80,8 +80,15 @@ export async function POST(
     targetAlbum: string;
   }> = [];
 
-  if (row.issueType === "compilation") {
+  if (row.issueType === "compilation" || row.issueType === "wrong-genre") {
     const result = await applyModify(args, row.albumName);
+    applyResults.push({ ...result, args, targetAlbum: row.albumName });
+  } else if (row.issueType === "junk") {
+    // First arg of proposedArgs tells us whether to remove or modify
+    const result =
+      args[0] === "remove"
+        ? await applyRemove(args)
+        : await applyModify(args, row.albumName);
     applyResults.push({ ...result, args, targetAlbum: row.albumName });
   } else if (row.issueType === "disc-split") {
     // args here is the list of variant album names to rename to the base name

@@ -14,6 +14,8 @@ import {
   Disc,
   Users,
   RefreshCw,
+  Trash2,
+  Tag,
 } from "lucide-react";
 
 interface DoctorJob {
@@ -46,6 +48,8 @@ interface ReviewItem {
 const ISSUE_ICONS: Record<string, React.ReactNode> = {
   compilation: <Users className="h-3.5 w-3.5" />,
   "disc-split": <Disc className="h-3.5 w-3.5" />,
+  junk: <Trash2 className="h-3.5 w-3.5" />,
+  "wrong-genre": <Tag className="h-3.5 w-3.5" />,
 };
 
 export function DoctorTab() {

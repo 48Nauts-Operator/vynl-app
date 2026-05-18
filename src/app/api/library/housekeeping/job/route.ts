@@ -736,6 +736,229 @@ async function runBeetsDoctor() {
     }
   }
 
+  // ── Pass 3: Junk / orphan entries ──
+  log("");
+  log("━━━ Pass 3/4: Junk / orphan entries ━━━");
+  const { findJunkEntries, findGenreIssues } = await import(
+    "@/lib/beets-doctor/detect"
+  );
+  const { buildJunkPrompt, buildGenrePrompt } = await import(
+    "@/lib/beets-doctor/prompts"
+  );
+  const { applyRemove } = await import("@/lib/beets-doctor/apply");
+
+  const junks = findJunkEntries();
+  log(`Found ${junks.length} suspicious entries.`);
+  log("");
+  job.total = comps.length + splits.length + junks.length;
+
+  for (let i = 0; i < junks.length; i++) {
+    if (job.status === "cancelled") return;
+    const j = junks[i];
+    job.current = comps.length + splits.length + i + 1;
+    scanned++;
+    const albumLabel = j.album === null ? "(null)" : j.album === "" ? "(empty)" : j.album;
+    log(`→ [${i + 1}/${junks.length}] reason=${j.reason}, album=${albumLabel}, title="${j.title}"`);
+
+    const verdict = await consultLLM(buildJunkPrompt(j));
+    if (!verdict) {
+      log(`  ⚠ LLM returned no valid JSON — skipping`);
+      errors++;
+      continue;
+    }
+    // verdict.command can be "modify" | "remove" | "skip"
+    const cmd = (verdict as unknown as { command: string }).command;
+    if (cmd === "skip" || !verdict.shouldFix) {
+      log(`  ✓ LLM says leave alone (${(verdict.confidence * 100).toFixed(0)}% conf)`);
+      continue;
+    }
+
+    const proposedAction = cmd === "remove" ? "remove" : "modify";
+    const targetForSnapshot = j.album || `id:${j.itemId}`;
+
+    if (verdict.confidence >= 1.0) {
+      if (planOnly) {
+        localDb.insert(beetsaiReview).values({
+          scanId,
+          issueType: "junk",
+          albumName: albumLabel,
+          albumArtist: j.artist,
+          context: JSON.stringify({
+            itemId: j.itemId,
+            title: j.title,
+            artist: j.artist,
+            path: j.path,
+            reason: j.reason,
+            planMode: true,
+            wouldAutoApply: true,
+            action: proposedAction,
+          }),
+          proposedCommand: `beet ${verdict.args.join(" ")}`,
+          proposedArgs: JSON.stringify(verdict.args),
+          confidence: verdict.confidence,
+          llmModel: llm.model,
+          reasoning: verdict.reasoning,
+          status: "pending",
+        }).run();
+        log(`  ▣ PLAN: would ${proposedAction} — ${verdict.reasoning}`);
+        queued++;
+        continue;
+      }
+      log(`  → applying: beet ${verdict.args.join(" ")}`);
+      const result =
+        proposedAction === "remove"
+          ? await applyRemove(verdict.args)
+          : await applyModify(verdict.args, j.album || "");
+      if (result.success) {
+        localDb.insert(beetsaiActions).values({
+          issueType: "junk",
+          albumName: albumLabel,
+          albumArtist: j.artist,
+          beetsCommand: `beet ${verdict.args.join(" ")}`,
+          beetsArgs: JSON.stringify(verdict.args),
+          before: JSON.stringify(result.before || { itemId: j.itemId, album: j.album, title: j.title }),
+          after: JSON.stringify(result.after || { removed: proposedAction === "remove" }),
+          source: "auto",
+          confidence: verdict.confidence,
+          llmModel: llm.model,
+          reasoning: verdict.reasoning,
+          status: "applied",
+        }).run();
+        log(`  ✓ ${proposedAction} — ${verdict.reasoning}`);
+        autoApplied++;
+      } else {
+        log(`  ✗ apply failed: ${result.error}`);
+        errors++;
+      }
+    } else {
+      localDb.insert(beetsaiReview).values({
+        scanId,
+        issueType: "junk",
+        albumName: albumLabel,
+        albumArtist: j.artist,
+        context: JSON.stringify({
+          itemId: j.itemId,
+          title: j.title,
+          artist: j.artist,
+          path: j.path,
+          reason: j.reason,
+          action: proposedAction,
+        }),
+        proposedCommand: `beet ${verdict.args.join(" ")}`,
+        proposedArgs: JSON.stringify(verdict.args),
+        confidence: verdict.confidence,
+        llmModel: llm.model,
+        reasoning: verdict.reasoning,
+        status: "pending",
+      }).run();
+      log(`  ⊕ queued (${(verdict.confidence * 100).toFixed(0)}% conf) — ${verdict.reasoning}`);
+      queued++;
+    }
+  }
+
+  // ── Pass 4: Empty / wrong genres ──
+  log("");
+  log("━━━ Pass 4/4: Empty / wrong genres ━━━");
+  const genres = findGenreIssues({ includeEmpty: true, limit: 300 });
+  log(`Found ${genres.length} candidate album(s) with missing or suspect genres.`);
+  log("");
+  job.total = comps.length + splits.length + junks.length + genres.length;
+
+  for (let i = 0; i < genres.length; i++) {
+    if (job.status === "cancelled") return;
+    const g = genres[i];
+    job.current = comps.length + splits.length + junks.length + i + 1;
+    scanned++;
+    const currentTag =
+      g.currentGenres.length === 0 ? "(empty)" : g.currentGenres.join(", ");
+    log(`→ [${i + 1}/${genres.length}] "${g.album}" by ${g.albumArtist} — current: ${currentTag}`);
+
+    const verdict = await consultLLM(buildGenrePrompt(g));
+    if (!verdict) {
+      log(`  ⚠ LLM returned no valid JSON — skipping`);
+      errors++;
+      continue;
+    }
+    if (!verdict.shouldFix || (verdict as unknown as { command: string }).command === "skip") {
+      log(`  ✓ LLM says genre is fine (${(verdict.confidence * 100).toFixed(0)}% conf)`);
+      continue;
+    }
+
+    if (verdict.confidence >= 1.0) {
+      if (planOnly) {
+        localDb.insert(beetsaiReview).values({
+          scanId,
+          issueType: "wrong-genre",
+          albumName: g.album,
+          albumArtist: g.albumArtist,
+          context: JSON.stringify({
+            trackCount: g.trackCount,
+            currentGenres: g.currentGenres,
+            sampleArtists: g.sampleArtists,
+            sampleTitles: g.sampleTitles,
+            year: g.year,
+            planMode: true,
+            wouldAutoApply: true,
+          }),
+          proposedCommand: `beet ${verdict.args.join(" ")}`,
+          proposedArgs: JSON.stringify(verdict.args),
+          confidence: verdict.confidence,
+          llmModel: llm.model,
+          reasoning: verdict.reasoning,
+          status: "pending",
+        }).run();
+        log(`  ▣ PLAN: would set genre — ${verdict.reasoning}`);
+        queued++;
+        continue;
+      }
+      log(`  → applying: beet ${verdict.args.join(" ")}`);
+      const result = await applyModify(verdict.args, g.album);
+      if (result.success) {
+        localDb.insert(beetsaiActions).values({
+          issueType: "wrong-genre",
+          albumName: g.album,
+          albumArtist: g.albumArtist,
+          beetsCommand: `beet ${verdict.args.join(" ")}`,
+          beetsArgs: JSON.stringify(verdict.args),
+          before: JSON.stringify(result.before || { genres: g.currentGenres }),
+          after: JSON.stringify(result.after || {}),
+          source: "auto",
+          confidence: verdict.confidence,
+          llmModel: llm.model,
+          reasoning: verdict.reasoning,
+          status: "applied",
+        }).run();
+        log(`  ✓ genre updated — ${verdict.reasoning}`);
+        autoApplied++;
+      } else {
+        log(`  ✗ apply failed: ${result.error}`);
+        errors++;
+      }
+    } else {
+      localDb.insert(beetsaiReview).values({
+        scanId,
+        issueType: "wrong-genre",
+        albumName: g.album,
+        albumArtist: g.albumArtist,
+        context: JSON.stringify({
+          trackCount: g.trackCount,
+          currentGenres: g.currentGenres,
+          sampleArtists: g.sampleArtists,
+          sampleTitles: g.sampleTitles,
+          year: g.year,
+        }),
+        proposedCommand: `beet ${verdict.args.join(" ")}`,
+        proposedArgs: JSON.stringify(verdict.args),
+        confidence: verdict.confidence,
+        llmModel: llm.model,
+        reasoning: verdict.reasoning,
+        status: "pending",
+      }).run();
+      log(`  ⊕ queued (${(verdict.confidence * 100).toFixed(0)}% conf) — ${verdict.reasoning}`);
+      queued++;
+    }
+  }
+
   log("");
   log("━━━ COMPLETE ━━━");
   log(`Scanned ${scanned} candidates`);
