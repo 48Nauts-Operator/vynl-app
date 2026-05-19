@@ -2,6 +2,13 @@
 
 import React, { useEffect, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
+
+// Build the /albums/[id] href for a (album, albumArtist) pair. Mirrors the
+// encoding used on the grid + list views: "<albumArtist>---<album>" URL-encoded.
+function albumHref(album: string, albumArtist: string): string {
+  return `/albums/${encodeURIComponent(`${albumArtist || "Unknown Artist"}---${album}`)}`;
+}
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -206,7 +213,11 @@ export default function StatsPage() {
                   <Trophy className="h-4 w-4 text-amber-400" /> Top Rated Tracks
                 </h3>
                 {data.bestRatedTracks.slice(0, 5).map((track, i) => (
-                  <div key={track.id} className="flex items-center gap-3">
+                  <Link
+                    key={track.id}
+                    href={albumHref(track.album, track.albumArtist || track.artist)}
+                    className="flex items-center gap-3 -mx-2 px-2 py-1 rounded hover:bg-secondary/40 transition-colors"
+                  >
                     <span className="text-xs text-muted-foreground w-4">{i + 1}</span>
                     <CoverThumb src={track.coverPath} alt={track.title} />
                     <div className="min-w-0 flex-1">
@@ -214,7 +225,7 @@ export default function StatsPage() {
                       <p className="text-xs text-muted-foreground truncate">{track.artist}</p>
                     </div>
                     <VinylRating rating={track.rating} size="sm" readOnly />
-                  </div>
+                  </Link>
                 ))}
                 {data.bestRatedTracks.length === 0 && (
                   <p className="text-sm text-muted-foreground">No rated tracks yet</p>
@@ -228,7 +239,11 @@ export default function StatsPage() {
                   <TrendingUp className="h-4 w-4 text-primary" /> Most Played Tracks
                 </h3>
                 {data.mostPlayedTracks.slice(0, 5).map((track, i) => (
-                  <div key={track.id} className="flex items-center gap-3">
+                  <Link
+                    key={track.id}
+                    href={albumHref(track.album, track.albumArtist || track.artist)}
+                    className="flex items-center gap-3 -mx-2 px-2 py-1 rounded hover:bg-secondary/40 transition-colors"
+                  >
                     <span className="text-xs text-muted-foreground w-4">{i + 1}</span>
                     <CoverThumb src={track.coverPath} alt={track.title} />
                     <div className="min-w-0 flex-1">
@@ -236,7 +251,7 @@ export default function StatsPage() {
                       <p className="text-xs text-muted-foreground truncate">{track.artist}</p>
                     </div>
                     <span className="text-xs text-muted-foreground">{track.playCount} plays</span>
-                  </div>
+                  </Link>
                 ))}
                 {data.mostPlayedTracks.length === 0 && (
                   <p className="text-sm text-muted-foreground">No play history yet</p>
@@ -250,7 +265,11 @@ export default function StatsPage() {
                   <Trophy className="h-4 w-4 text-amber-400" /> Top Rated Albums
                 </h3>
                 {data.bestRatedAlbums.slice(0, 5).map((album, i) => (
-                  <div key={`${album.album}-${album.albumArtist}`} className="flex items-center gap-3">
+                  <Link
+                    key={`${album.album}-${album.albumArtist}`}
+                    href={albumHref(album.album, album.albumArtist)}
+                    className="flex items-center gap-3 -mx-2 px-2 py-1 rounded hover:bg-secondary/40 transition-colors"
+                  >
                     <span className="text-xs text-muted-foreground w-4">{i + 1}</span>
                     <CoverThumb src={album.coverPath} alt={album.album} />
                     <div className="min-w-0 flex-1">
@@ -258,7 +277,7 @@ export default function StatsPage() {
                       <p className="text-xs text-muted-foreground truncate">{album.albumArtist}</p>
                     </div>
                     <VinylRating rating={Math.round(album.avgRating)} size="sm" readOnly />
-                  </div>
+                  </Link>
                 ))}
                 {data.bestRatedAlbums.length === 0 && (
                   <p className="text-sm text-muted-foreground">Rate 3+ tracks per album to see rankings</p>
@@ -272,7 +291,11 @@ export default function StatsPage() {
                   <TrendingUp className="h-4 w-4 text-primary" /> Most Played Albums
                 </h3>
                 {data.mostPlayedAlbums.slice(0, 5).map((album, i) => (
-                  <div key={`${album.album}-${album.albumArtist}`} className="flex items-center gap-3">
+                  <Link
+                    key={`${album.album}-${album.albumArtist}`}
+                    href={albumHref(album.album, album.albumArtist)}
+                    className="flex items-center gap-3 -mx-2 px-2 py-1 rounded hover:bg-secondary/40 transition-colors"
+                  >
                     <span className="text-xs text-muted-foreground w-4">{i + 1}</span>
                     <CoverThumb src={album.coverPath} alt={album.album} />
                     <div className="min-w-0 flex-1">
@@ -280,7 +303,7 @@ export default function StatsPage() {
                       <p className="text-xs text-muted-foreground truncate">{album.albumArtist}</p>
                     </div>
                     <span className="text-xs text-muted-foreground">{album.totalPlays} plays</span>
-                  </div>
+                  </Link>
                 ))}
                 {data.mostPlayedAlbums.length === 0 && (
                   <p className="text-sm text-muted-foreground">No play history yet</p>
@@ -302,8 +325,9 @@ export default function StatsPage() {
                 <span className="text-right">Plays</span>
               </div>
               {data.bestRatedAlbums.map((album, i) => (
-                <div
+                <Link
                   key={`${album.album}-${album.albumArtist}`}
+                  href={albumHref(album.album, album.albumArtist)}
                   className="grid grid-cols-[40px_48px_1fr_130px_80px] gap-3 px-4 py-2 hover:bg-secondary/30 transition-colors items-center"
                 >
                   <span className="text-sm text-muted-foreground">{i + 1}</span>
@@ -317,7 +341,7 @@ export default function StatsPage() {
                     <span className="text-xs text-muted-foreground">({album.avgRating})</span>
                   </div>
                   <span className="text-sm text-muted-foreground text-right">{album.totalPlays}</span>
-                </div>
+                </Link>
               ))}
               {data.bestRatedAlbums.length === 0 && (
                 <p className="text-sm text-muted-foreground p-6 text-center">
@@ -340,8 +364,9 @@ export default function StatsPage() {
                 <span className="text-right">Plays</span>
               </div>
               {data.bestRatedTracks.map((track, i) => (
-                <div
+                <Link
                   key={track.id}
+                  href={albumHref(track.album, track.albumArtist || track.artist)}
                   className="grid grid-cols-[40px_48px_1fr_130px_80px] gap-3 px-4 py-2 hover:bg-secondary/30 transition-colors items-center"
                 >
                   <span className="text-sm text-muted-foreground">{i + 1}</span>
@@ -354,7 +379,7 @@ export default function StatsPage() {
                   </div>
                   <VinylRating rating={track.rating} size="sm" readOnly />
                   <span className="text-sm text-muted-foreground text-right">{track.playCount}</span>
-                </div>
+                </Link>
               ))}
               {data.bestRatedTracks.length === 0 && (
                 <p className="text-sm text-muted-foreground p-6 text-center">
@@ -375,8 +400,9 @@ export default function StatsPage() {
                 </h3>
               </div>
               {data.mostPlayedTracks.map((track, i) => (
-                <div
+                <Link
                   key={track.id}
+                  href={albumHref(track.album, track.albumArtist || track.artist)}
                   className="grid grid-cols-[40px_48px_1fr_80px] gap-3 px-4 py-2 hover:bg-secondary/30 transition-colors items-center"
                 >
                   <span className="text-sm text-muted-foreground">{i + 1}</span>
@@ -388,7 +414,7 @@ export default function StatsPage() {
                     </p>
                   </div>
                   <span className="text-sm text-muted-foreground text-right">{track.playCount} plays</span>
-                </div>
+                </Link>
               ))}
             </CardContent>
           </Card>
@@ -401,8 +427,9 @@ export default function StatsPage() {
                 </h3>
               </div>
               {data.mostPlayedAlbums.map((album, i) => (
-                <div
+                <Link
                   key={`${album.album}-${album.albumArtist}`}
+                  href={albumHref(album.album, album.albumArtist)}
                   className="grid grid-cols-[40px_48px_1fr_80px] gap-3 px-4 py-2 hover:bg-secondary/30 transition-colors items-center"
                 >
                   <span className="text-sm text-muted-foreground">{i + 1}</span>
@@ -412,7 +439,7 @@ export default function StatsPage() {
                     <p className="text-xs text-muted-foreground truncate">{album.albumArtist}</p>
                   </div>
                   <span className="text-sm text-muted-foreground text-right">{album.totalPlays} plays</span>
-                </div>
+                </Link>
               ))}
             </CardContent>
           </Card>
@@ -435,20 +462,28 @@ export default function StatsPage() {
                   className="grid grid-cols-[40px_48px_1fr_130px_100px] gap-3 px-4 py-2 hover:bg-secondary/30 transition-colors items-center"
                 >
                   <span className="text-sm text-muted-foreground">{i + 1}</span>
-                  <CoverThumb src={track.coverPath} alt={track.title} />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{track.title}</p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {track.artist} — {track.album}
-                    </p>
-                  </div>
+                  <Link
+                    href={albumHref(track.album, track.albumArtist || track.artist)}
+                    className="contents"
+                  >
+                    <CoverThumb src={track.coverPath} alt={track.title} />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate hover:text-primary transition-colors">{track.title}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {track.artist} — {track.album}
+                      </p>
+                    </div>
+                  </Link>
                   <VinylRating rating={track.rating} size="sm" readOnly />
                   <div className="flex justify-end">
                     <Button
                       variant="ghost"
                       size="sm"
                       className="h-7 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
-                      onClick={() => handleArchive(track.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleArchive(track.id);
+                      }}
                       disabled={archiving.has(track.id)}
                     >
                       <Archive className="h-3 w-3 mr-1" />

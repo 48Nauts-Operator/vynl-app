@@ -38,6 +38,17 @@ export async function GET(
     }
 
     const first = albumTracks[0];
+    // Derive the album type for the detail header. Mirrors the
+    // Albums-page filter logic: compilations = any track flagged,
+    // singles = exactly one track, everything else is a regular album.
+    const anyCompilation = albumTracks.some(
+      (t: any) => t.is_compilation === 1
+    );
+    const albumType: "compilation" | "single" | "album" = anyCompilation
+      ? "compilation"
+      : albumTracks.length === 1
+        ? "single"
+        : "album";
     const albumInfo = {
       album: first.album,
       albumArtist: first.album_artist || first.artist,
@@ -45,6 +56,8 @@ export async function GET(
       genre: first.genre,
       coverPath: first.cover_path,
       trackCount: albumTracks.length,
+      isCompilation: anyCompilation,
+      albumType,
       totalDuration: albumTracks.reduce(
         (sum: number, t: any) => sum + (t.duration || 0),
         0

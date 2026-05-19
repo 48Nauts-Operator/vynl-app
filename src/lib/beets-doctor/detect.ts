@@ -346,3 +346,133 @@ export function findGenreIssues(opts: {
 // Silence unused-decode-path warning for now — used by future detectors that
 // will need to surface file paths in LLM context.
 export const _decodePath = decodePath;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rule-based verdicts (PR A / v0.7.0 redesign)
+//
+// Each detector gets a sibling judge*() function that returns a verdict
+// without consulting an LLM. The runner uses this to bypass the LLM for
+// candidates whose right action is deterministic from metadata alone
+// (e.g. "76 distinct artists on one album → compilation, always"). Where
+// the rule is genuinely uncertain (auto=false), the runner falls back to
+// the LLM path (or, in DIAG-only mode, queues the candidate for opt-in
+// per-category LLM evaluation).
+//
+// All judge*() functions are pure — no DB writes, no spawn, no network.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface RuleVerdict {
+  /** True = apply automatically without LLM. False = needs human/LLM. */
+  auto: boolean;
+  /** 0..1 — only meaningful when auto=true (then always 1.0). */
+  confidence: number;
+  /** Beet command args to apply when auto=true. Empty/undefined when not. */
+  command?: string[];
+  /** Short human-readable explanation. Shows up in logs + audit rows. */
+  reasoning: string;
+}
+
+/**
+ * Compilation candidates are unambiguous when many distinct artists share
+ * one album and the album isn't already flagged. Threshold tuned to
+ * minimise false positives — a real single-artist album rarely has
+ * 8+ distinct credited artists across its tracks.
+ */
+export function judgeCompilation(c: CompilationCandidate): RuleVerdict {
+  if (c.isFlaggedComp) {
+    return { auto: false, confidence: 0, reasoning: "Already flagged as compilation." };
+  }
+  if ((c.currentAlbumArtist || "").toLowerCase().includes("various")) {
+    return { auto: false, confidence: 0, reasoning: "Album artist already 'Various Artists'." };
+  }
+  if (c.distinctArtists >= 8) {
+    return {
+      auto: true,
+      confidence: 1.0,
+      command: [
+        "modify", "-y",
+        `album:${c.album}`,
+        "albumartist=Various Artists",
+        "comp=1",
+      ],
+      reasoning: `${c.distinctArtists} distinct track artists across ${c.trackCount} tracks — unambiguous compilation.`,
+    };
+  }
+  return {
+    auto: false,
+    confidence: 0,
+    reasoning: `${c.distinctArtists} distinct artists is borderline — needs human or LLM judgement.`,
+  };
+}
+
+/**
+ * Disc-split groups are unambiguous when every part shares the same
+ * albumartist and they're clearly suffixed variants of the same base.
+ * Different albumartists could mean different albums that happen to
+ * share a base name (e.g. two artists each titled their album
+ * "Greatest Hits") — those need human judgement.
+ */
+export function judgeDiscSplit(c: DiscSplitCandidate): RuleVerdict {
+  if (c.parts.length < 2) {
+    return { auto: false, confidence: 0, reasoning: "Only one part — not a split." };
+  }
+  const firstArtist = (c.parts[0].albumArtist || "").trim().toLowerCase();
+  const allSameArtist =
+    firstArtist.length > 0 &&
+    c.parts.every((p) => (p.albumArtist || "").trim().toLowerCase() === firstArtist);
+  if (!allSameArtist) {
+    return {
+      auto: false,
+      confidence: 0,
+      reasoning: "Parts have different album artists — could be unrelated albums sharing a base name.",
+    };
+  }
+  // First-part variant's rename — runner will iterate the rest.
+  return {
+    auto: true,
+    confidence: 1.0,
+    command: [
+      "modify", "-y",
+      `album:${c.parts[0].album}`,
+      `album=${c.baseName}`,
+    ],
+    reasoning: `All ${c.parts.length} parts share albumartist "${c.parts[0].albumArtist}" — safe to merge under "${c.baseName}".`,
+  };
+}
+
+/**
+ * Junk entries with the explicit "url-as-album" or "blank-album" reason
+ * codes from findJunkEntries are safe to auto-remove from the beets DB
+ * (never from disk — applyRemove strips the -d flag). Single-track
+ * stubs are more ambiguous (could be a legitimately rare track) so
+ * those still go through review.
+ */
+export function judgeJunk(c: JunkCandidate): RuleVerdict {
+  if (c.reason === "url-as-album" || c.reason === "blank-album") {
+    return {
+      auto: true,
+      confidence: 1.0,
+      command: ["remove", "-y", `id:${c.itemId}`],
+      reasoning: `${c.reason} — removing from beets DB (file on disk untouched).`,
+    };
+  }
+  return {
+    auto: false,
+    confidence: 0,
+    reasoning: `Reason "${c.reason}" requires human judgement.`,
+  };
+}
+
+/**
+ * Genre judgement is intentionally LLM-only. No rule can reliably guess
+ * the right genre from metadata alone, and applying a wrong genre
+ * across an album is more annoying than leaving the empty-or-bad state.
+ * Returned for API symmetry; always auto=false.
+ */
+export function judgeGenre(_c: GenreCandidate): RuleVerdict {
+  return {
+    auto: false,
+    confidence: 0,
+    reasoning: "Genre needs LLM judgement — no rule can guess the right tag.",
+  };
+}

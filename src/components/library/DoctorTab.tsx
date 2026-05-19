@@ -16,7 +16,13 @@ import {
   RefreshCw,
   Trash2,
   Tag,
+  HelpCircle,
 } from "lucide-react";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 interface DoctorJob {
   id?: string;
@@ -314,6 +320,67 @@ export function DoctorTab() {
               <CardTitle className="text-lg flex items-center gap-2">
                 <Stethoscope className="h-5 w-5" />
                 BeetsAI Doctor
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-foreground transition-colors"
+                      aria-label="What does BeetsAI Doctor do?"
+                    >
+                      <HelpCircle className="h-4 w-4" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-96 text-xs leading-relaxed space-y-3" side="bottom" align="start">
+                    <div>
+                      <p className="font-semibold text-sm mb-1">What is BeetsAI Doctor?</p>
+                      <p className="text-muted-foreground">
+                        A full-library cleanup assistant. Scans for four
+                        classes of metadata problems, applies the obvious
+                        fixes automatically, and queues anything uncertain
+                        for your review.
+                      </p>
+                    </div>
+                    <div>
+                      <p className="font-semibold mb-1">What it looks for</p>
+                      <ul className="text-muted-foreground space-y-1 list-disc list-inside">
+                        <li>
+                          <b>Compilations</b> — albums with many distinct
+                          artists not yet flagged as Various Artists.
+                        </li>
+                        <li>
+                          <b>Disc splits</b> — multi-disc albums stored as
+                          separate entries that should be merged.
+                        </li>
+                        <li>
+                          <b>Junk entries</b> — orphan rows with broken
+                          metadata (blank albums, URLs as album names).
+                        </li>
+                        <li>
+                          <b>Wrong / missing genres</b> — empty or clearly
+                          mismatched genre tags.
+                        </li>
+                      </ul>
+                    </div>
+                    <div>
+                      <p className="font-semibold mb-1">How fixes apply</p>
+                      <p className="text-muted-foreground">
+                        Every fix updates three layers atomically: the
+                        beets DB, the file tags via <code>beet write</code>,
+                        and Vynl&apos;s own tracks table so the UI shows the
+                        change immediately. Every action is logged for audit.
+                      </p>
+                    </div>
+                    <div>
+                      <p className="font-semibold mb-1">Plan mode</p>
+                      <p className="text-muted-foreground">
+                        Recommended for the first run. Detects + judges
+                        candidates but writes nothing — everything queues
+                        for review so you can eyeball what Doctor wants
+                        to do before approving it.
+                      </p>
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </CardTitle>
               <p className="text-xs text-muted-foreground mt-1">
                 Scans the entire library, sends each problem to the configured LLM, auto-applies fixes the model is 100% confident in, queues the rest for review. Logged to the BeetsAI actions table.
