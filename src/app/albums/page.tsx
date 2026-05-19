@@ -37,13 +37,17 @@ interface Album {
   track_count: number;
   total_duration: number;
   first_track_id: number;
+  is_compilation: number;
 }
+
+type AlbumType = "all" | "albums" | "compilations" | "singles";
 
 export default function AlbumsPage() {
   const [albums, setAlbums] = useState<Album[]>([]);
   const [genres, setGenres] = useState<string[]>([]);
   const [sort, setSort] = useState("artist");
   const [genre, setGenre] = useState<string | null>(null);
+  const [type, setType] = useState<AlbumType>("all");
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [loading, setLoading] = useState(true);
@@ -89,6 +93,7 @@ export default function AlbumsPage() {
       const params = new URLSearchParams({ sort });
       if (genre) params.set("genre", genre);
       if (search.trim()) params.set("search", search.trim());
+      if (type !== "all") params.set("type", type);
       const res = await fetch(`/api/albums?${params}`);
       const data = await res.json();
       setAlbums(data.albums || []);
@@ -98,7 +103,7 @@ export default function AlbumsPage() {
     // Debounce search input
     const timer = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(timer);
-  }, [sort, genre, search]);
+  }, [sort, genre, search, type]);
 
   // Close context menu on click elsewhere
   useEffect(() => {
@@ -231,6 +236,17 @@ export default function AlbumsPage() {
             )}
           </div>
           <GenreFilter genres={genres} value={genre} onChange={setGenre} />
+          <Select value={type} onValueChange={(v) => setType(v as AlbumType)}>
+            <SelectTrigger className="w-[150px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="albums">Albums</SelectItem>
+              <SelectItem value="compilations">Compilations</SelectItem>
+              <SelectItem value="singles">Singles</SelectItem>
+            </SelectContent>
+          </Select>
           <Select value={sort} onValueChange={setSort}>
             <SelectTrigger className="w-[160px]">
               <SelectValue />

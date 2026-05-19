@@ -209,11 +209,19 @@ async function runRefreshMetadata() {
       const metadata = await parseFile(track.filePath);
       const { common, format } = metadata;
 
+      // Compilation detection: iTunes TCMP tag wins; fall back to an
+      // albumartist heuristic for files that never had TCMP written. Same
+      // logic as filesystem-adapter so initial scan and refresh agree.
+      const newAlbumArtist = common.albumartist || track.albumArtist;
+      const newIsCompilation =
+        common.compilation === true ||
+        (newAlbumArtist || "").toLowerCase().includes("various");
+
       const newData = {
         title: common.title || track.title,
         artist: common.artist || track.artist,
         album: common.album || track.album,
-        albumArtist: common.albumartist || track.albumArtist,
+        albumArtist: newAlbumArtist,
         genre: common.genre?.[0] || track.genre,
         year: common.year || track.year,
         trackNumber: common.track?.no || track.trackNumber,
@@ -221,6 +229,7 @@ async function runRefreshMetadata() {
         duration: format.duration || track.duration,
         bitrate: format.bitrate ? Math.round(format.bitrate / 1000) : track.bitrate,
         sampleRate: format.sampleRate || track.sampleRate,
+        isCompilation: newIsCompilation,
       };
 
       // Check if anything actually changed
@@ -235,7 +244,8 @@ async function runRefreshMetadata() {
         newData.discNumber !== track.discNumber ||
         Math.abs((newData.duration || 0) - (track.duration || 0)) > 0.5 ||
         newData.bitrate !== track.bitrate ||
-        newData.sampleRate !== track.sampleRate;
+        newData.sampleRate !== track.sampleRate ||
+        newData.isCompilation !== track.isCompilation;
 
       if (changed) {
         db.update(tracks).set(newData).where(sql`${tracks.id} = ${track.id}`).run();

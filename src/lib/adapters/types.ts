@@ -14,6 +14,10 @@ export interface ScannedTrack {
   bitrate?: number;
   sampleRate?: number;
   isrc?: string;
+  // True if the track belongs to a compilation (iTunes TCMP tag or
+  // albumartist looks like Various Artists). Populated by adapters and
+  // mirrored into the tracks table for the Albums-page filter.
+  isCompilation?: boolean;
   coverData?: {
     data: Buffer;
     format: string;

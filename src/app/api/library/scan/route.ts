@@ -105,6 +105,7 @@ export async function POST(request: NextRequest) {
             bitrate: track.bitrate,
             sampleRate: track.sampleRate,
             isrc: track.isrc,
+            isCompilation: track.isCompilation ?? false,
             coverPath,
             source: "local",
           })
@@ -125,6 +126,7 @@ export async function POST(request: NextRequest) {
               bitrate: track.bitrate,
               sampleRate: track.sampleRate,
               isrc: track.isrc,
+              isCompilation: track.isCompilation ?? false,
               coverPath,
             },
           })
