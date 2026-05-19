@@ -24,6 +24,10 @@ export const tracks = sqliteTable("tracks", {
   addedAt: text("added_at").default(sql`(datetime('now'))`),
   lastPlayedAt: text("last_played_at"),
   playCount: integer("play_count").default(0),
+  // True when this track belongs to a compilation (Various Artists / TCMP).
+  // Populated from the iTunes TCMP tag by the metadata-refresh job.
+  // Drives the Albums-page filter (Albums / Compilations / Singles).
+  isCompilation: integer("is_compilation", { mode: "boolean" }).default(false),
 });
 
 export const playlists = sqliteTable("playlists", {
