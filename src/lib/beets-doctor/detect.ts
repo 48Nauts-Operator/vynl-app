@@ -279,12 +279,19 @@ export function findGenreIssues(opts: {
       : includeEmpty
         ? "(genres IS NULL OR genres = '' OR LENGTH(TRIM(genres)) = 0)"
         : "1=1";
+    // Group by album NAME ONLY. Previously grouped by (album, albumartist)
+    // which produced N rows per album for un-flagged compilations where
+    // each track had a different albumartist (4x "Gloria" bug). Same fix
+    // class as the disc-split 60x bug we fixed earlier — dedup at the
+    // SQL layer so the LLM never sees the same album twice.
     const rows = db
       .prepare(
         `
         SELECT
           album,
-          COALESCE(albumartist, artist) as album_artist,
+          (SELECT COALESCE(albumartist, artist) FROM items i2
+             WHERE i2.album = items.album
+             ORDER BY i2.id LIMIT 1) as album_artist,
           COUNT(*) as track_count,
           MIN(year) as year,
           GROUP_CONCAT(DISTINCT genres) as all_genres
@@ -293,7 +300,7 @@ export function findGenreIssues(opts: {
           AND id IN (
             SELECT id FROM items WHERE ${where}
           )
-        GROUP BY album, COALESCE(albumartist, artist)
+        GROUP BY album
         ORDER BY track_count DESC
         LIMIT ?
         `
@@ -309,14 +316,14 @@ export function findGenreIssues(opts: {
     return rows.map((r) => {
       const samples = db
         .prepare(
-          `SELECT DISTINCT artist FROM items WHERE album = ? AND COALESCE(albumartist, artist) = ? LIMIT 5`
+          `SELECT DISTINCT artist FROM items WHERE album = ? LIMIT 5`
         )
-        .all(r.album, r.album_artist) as Array<{ artist: string }>;
+        .all(r.album) as Array<{ artist: string }>;
       const titles = db
         .prepare(
-          `SELECT title FROM items WHERE album = ? AND COALESCE(albumartist, artist) = ? LIMIT 5`
+          `SELECT title FROM items WHERE album = ? LIMIT 5`
         )
-        .all(r.album, r.album_artist) as Array<{ title: string }>;
+        .all(r.album) as Array<{ title: string }>;
       const currentGenres = (r.all_genres || "")
         .split(",")
         .map((s) => s.trim())
