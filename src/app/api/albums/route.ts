@@ -9,6 +9,11 @@ export async function GET(request: NextRequest) {
     const genre = request.nextUrl.searchParams.get("genre");
     const search = request.nextUrl.searchParams.get("search")?.trim();
     const limit = request.nextUrl.searchParams.get("limit");
+    // type: all | albums | compilations | singles
+    // - albums: multi-track, not a comp
+    // - compilations: any track flagged is_compilation=1 in the group
+    // - singles: exactly one track in the album group
+    const type = (request.nextUrl.searchParams.get("type") || "all").toLowerCase();
 
     let query = `
       SELECT
@@ -18,6 +23,7 @@ export async function GET(request: NextRequest) {
         cover_path,
         genre,
         COUNT(*) as track_count,
+        MAX(is_compilation) as is_compilation,
         SUM(duration) as total_duration,
         MIN(id) as first_track_id,
         MAX(added_at) as latest_added
@@ -48,6 +54,24 @@ export async function GET(request: NextRequest) {
     }
 
     query += ` GROUP BY album, COALESCE(album_artist, artist)`;
+
+    // Type filter via HAVING — applied after grouping so we can use
+    // MAX(is_compilation) and COUNT(*) aggregates.
+    switch (type) {
+      case "albums":
+        query += ` HAVING MAX(is_compilation) = 0 AND COUNT(*) >= 2`;
+        break;
+      case "compilations":
+        query += ` HAVING MAX(is_compilation) = 1`;
+        break;
+      case "singles":
+        query += ` HAVING COUNT(*) = 1`;
+        break;
+      case "all":
+      default:
+        // No HAVING — return everything.
+        break;
+    }
 
     switch (sort) {
       case "recent":
