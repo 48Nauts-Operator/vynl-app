@@ -18,6 +18,9 @@ export interface UIPreferences {
    *  clicked. Default on. When off, the click still adds the track
    *  to the All-Time Songs playlist but skips the animation. */
   celebrateFiveStar: boolean;
+  /** Optional display name. Used to personalise greetings on the
+   *  Home page (e.g. "Welcome back, Andre"). Empty = generic greeting. */
+  userName: string;
 }
 
 interface SettingsState {
@@ -45,6 +48,7 @@ export const useSettingsStore = create<SettingsState>()(
       },
       ui: {
         celebrateFiveStar: true,
+        userName: "",
       },
       toggleFeature: (key) =>
         set((state) => ({

@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LLMSettingsPanel } from "@/components/settings/LLMSettingsPanel";
 import { FlightCheckPanel } from "@/components/settings/FlightCheckPanel";
+import { HealthStatusCards } from "@/components/settings/HealthStatusCards";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -53,6 +54,7 @@ import {
   Eye,
   FolderSearch,
   Disc3,
+  User,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatFileSize } from "@/lib/utils";
@@ -769,47 +771,103 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-3xl font-bold">Settings</h1>
         <p className="text-muted-foreground mt-1">
-          Configure your Vynl instance
+          {hydrated && ui?.userName
+            ? `Hey ${ui.userName} — your Vynl, your rules.`
+            : "Configure your Vynl instance"}
         </p>
       </div>
 
+      {/* Top-of-page health status cards — at-a-glance system view. */}
+      <HealthStatusCards />
+
+      {/* Personalisation — name used in greetings. */}
+      <Card>
+        <CardHeader className="cursor-pointer select-none" onClick={() => toggle("personal")}>
+          <CardTitle className="flex items-center gap-2">
+            <User className="h-5 w-5" />
+            Personalisation
+            <ChevronDown className={`h-4 w-4 ml-auto transition-transform ${isOpen("personal") ? "" : "-rotate-90"}`} />
+          </CardTitle>
+        </CardHeader>
+        {isOpen("personal") && (
+          <CardContent className="space-y-3">
+            <div>
+              <Label htmlFor="userName" className="text-sm">What shall we call you?</Label>
+              <Input
+                id="userName"
+                placeholder="Andre"
+                value={hydrated ? (ui?.userName ?? "") : ""}
+                onChange={(e) => setUIPreference("userName", e.target.value)}
+                className="mt-1.5"
+                maxLength={40}
+              />
+              <p className="text-xs text-muted-foreground mt-1.5">
+                Used in the greeting on the Home page. Leave blank for the generic welcome.
+              </p>
+            </div>
+            <div className="flex items-center justify-between py-2 border-t border-border/40 pt-3">
+              <div className="flex items-center gap-3">
+                <Disc3 className="h-4 w-4 text-[#a855f7]" />
+                <div>
+                  <p className="text-sm font-medium">5-Vynl Celebration</p>
+                  <p className="text-xs text-muted-foreground">
+                    Show the spinning-vinyl overlay when you crown a track with 5 Vynls. Tracks still get added to All-Time Songs either way.
+                  </p>
+                </div>
+              </div>
+              <Switch
+                checked={hydrated && (ui?.celebrateFiveStar ?? true)}
+                onCheckedChange={(v) => setUIPreference("celebrateFiveStar", v)}
+              />
+            </div>
+            <div className="flex items-center justify-between py-2">
+              <div className="flex items-center gap-3">
+                <Code className="h-4 w-4 text-muted-foreground" />
+                <div>
+                  <p className="text-sm font-medium">Developer Mode</p>
+                  <p className="text-xs text-muted-foreground">Show advanced integrations</p>
+                </div>
+              </div>
+              <Switch
+                checked={hydrated && features.developerMode}
+                onCheckedChange={() => toggleFeature("developerMode")}
+              />
+            </div>
+          </CardContent>
+        )}
+      </Card>
+
       {/* Flight Check — quick environment / dependency health */}
-      <FlightCheckPanel />
+      <Card>
+        <CardHeader className="cursor-pointer select-none" onClick={() => toggle("flightcheck")}>
+          <CardTitle className="flex items-center gap-2">
+            <HeartPulse className="h-5 w-5" />
+            Flight Check
+            <ChevronDown className={`h-4 w-4 ml-auto transition-transform ${isOpen("flightcheck") ? "" : "-rotate-90"}`} />
+          </CardTitle>
+        </CardHeader>
+        {isOpen("flightcheck") && (
+          <CardContent>
+            <FlightCheckPanel />
+          </CardContent>
+        )}
+      </Card>
 
       {/* LLM Provider — used by album-analyze, discover, artist intel, DJ */}
-      <LLMSettingsPanel />
-
-      {/* Developer Mode Toggle */}
-      <div className="flex items-center justify-between py-2 px-1">
-        <div className="flex items-center gap-3">
-          <Code className="h-4 w-4 text-muted-foreground" />
-          <div>
-            <p className="text-sm font-medium">Developer Mode</p>
-            <p className="text-xs text-muted-foreground">Show advanced integrations</p>
-          </div>
-        </div>
-        <Switch
-          checked={hydrated && features.developerMode}
-          onCheckedChange={() => toggleFeature("developerMode")}
-        />
-      </div>
-
-      {/* 5-star celebration animation toggle */}
-      <div className="flex items-center justify-between py-2 px-1">
-        <div className="flex items-center gap-3">
-          <Disc3 className="h-4 w-4 text-[#a855f7]" />
-          <div>
-            <p className="text-sm font-medium">5-Vynl Celebration</p>
-            <p className="text-xs text-muted-foreground">
-              Show the spinning-vinyl overlay when you crown a track with 5 Vynls. Tracks still get added to All-Time Songs either way.
-            </p>
-          </div>
-        </div>
-        <Switch
-          checked={hydrated && (ui?.celebrateFiveStar ?? true)}
-          onCheckedChange={(v) => setUIPreference("celebrateFiveStar", v)}
-        />
-      </div>
+      <Card>
+        <CardHeader className="cursor-pointer select-none" onClick={() => toggle("llm")}>
+          <CardTitle className="flex items-center gap-2">
+            <BrainCircuit className="h-5 w-5" />
+            LLM Provider
+            <ChevronDown className={`h-4 w-4 ml-auto transition-transform ${isOpen("llm") ? "" : "-rotate-90"}`} />
+          </CardTitle>
+        </CardHeader>
+        {isOpen("llm") && (
+          <CardContent>
+            <LLMSettingsPanel />
+          </CardContent>
+        )}
+      </Card>
 
       {/* Feature Toggles */}
       <Card>
