@@ -489,6 +489,9 @@ async function runBeetsDoctor() {
   const {
     findCompilationCandidates,
     findDiscSplits,
+    judgeCompilation,
+    judgeDiscSplit,
+    judgeJunk,
   } = await import("@/lib/beets-doctor/detect");
   const { buildCompilationPrompt, buildDiscSplitPrompt } = await import(
     "@/lib/beets-doctor/prompts"
@@ -603,16 +606,35 @@ async function runBeetsDoctor() {
     scanned++;
     log(`→ [${i + 1}/${comps.length}] "${c.album}" (${c.distinctArtists} artists, ${c.trackCount} tracks)`);
 
-    const verdict = await consultLLM(buildCompilationPrompt(c));
-    if (!verdict) {
-      log(`  ⚠ LLM returned no valid JSON — skipping`);
-      errors++;
-      continue;
+    // RULE-FIRST: bypass the LLM when the metadata makes the call
+    // deterministic (>= 8 distinct artists → unambiguous compilation).
+    // The LLM only sees genuinely borderline candidates from here on.
+    const rule = judgeCompilation(c);
+    let verdict: LLMVerdict | null = null;
+    let usedRule = false;
+    if (rule.auto && rule.command) {
+      verdict = {
+        shouldFix: true,
+        confidence: 1.0,
+        command: "modify",
+        args: rule.command,
+        reasoning: rule.reasoning,
+      };
+      usedRule = true;
+      log(`  ▸ rule: ${rule.reasoning}`);
+    } else {
+      verdict = await consultLLM(buildCompilationPrompt(c));
+      if (!verdict) {
+        log(`  ⚠ LLM returned no valid JSON — skipping`);
+        errors++;
+        continue;
+      }
+      if (!verdict.shouldFix) {
+        log(`  ✓ LLM says not a compilation (${(verdict.confidence * 100).toFixed(0)}% conf) — skipping`);
+        continue;
+      }
     }
-    if (!verdict.shouldFix) {
-      log(`  ✓ LLM says not a compilation (${(verdict.confidence * 100).toFixed(0)}% conf) — skipping`);
-      continue;
-    }
+    const modelLabel = usedRule ? "rule-based" : llm.model;
 
     if (verdict.confidence >= 1.0) {
       if (planOnly) {
@@ -635,11 +657,11 @@ async function runBeetsDoctor() {
           proposedCommand: `beet ${verdict.args.join(" ")}`,
           proposedArgs: JSON.stringify(verdict.args),
           confidence: verdict.confidence,
-          llmModel: llm.model,
+          llmModel: modelLabel,
           reasoning: verdict.reasoning,
           status: "pending",
         }).run();
-        log(`  ▣ PLAN: would auto-apply (100% conf) — ${verdict.reasoning}`);
+        log(`  ▣ PLAN: would auto-apply (100% conf, ${modelLabel}) — ${verdict.reasoning}`);
         queued++;
         continue;
       }
@@ -654,9 +676,9 @@ async function runBeetsDoctor() {
           beetsArgs: JSON.stringify(verdict.args),
           before: JSON.stringify(result.before || {}),
           after: JSON.stringify(result.after || {}),
-          source: "auto",
+          source: usedRule ? "rule" : "auto",
           confidence: verdict.confidence,
-          llmModel: llm.model,
+          llmModel: modelLabel,
           reasoning: verdict.reasoning,
           status: "applied",
         }).run();
@@ -688,7 +710,7 @@ async function runBeetsDoctor() {
         proposedCommand: `beet ${verdict.args.join(" ")}`,
         proposedArgs: JSON.stringify(verdict.args),
         confidence: verdict.confidence,
-        llmModel: llm.model,
+        llmModel: modelLabel,
         reasoning: verdict.reasoning,
         status: "pending",
       }).run();
@@ -714,16 +736,36 @@ async function runBeetsDoctor() {
       `→ [${i + 1}/${splits.length}] "${s.baseName}" (${s.parts.length} variants: ${s.parts.map((p) => `"${p.album}"`).join(" + ")})`
     );
 
-    const verdict = await consultLLM(buildDiscSplitPrompt(s));
-    if (!verdict) {
-      log(`  ⚠ LLM returned no valid JSON — skipping`);
-      errors++;
-      continue;
+    // RULE-FIRST: if every variant shares the same albumartist, the
+    // merge is deterministic (same release, just split across discs).
+    // Different artists need LLM judgement (could be unrelated albums
+    // that happen to share a base name).
+    const splitRule = judgeDiscSplit(s);
+    let verdict: LLMVerdict | null = null;
+    let usedRule = false;
+    if (splitRule.auto) {
+      verdict = {
+        shouldFix: true,
+        confidence: 1.0,
+        command: "modify",
+        args: [], // unused — the loop below builds per-variant args
+        reasoning: splitRule.reasoning,
+      };
+      usedRule = true;
+      log(`  ▸ rule: ${splitRule.reasoning}`);
+    } else {
+      verdict = await consultLLM(buildDiscSplitPrompt(s));
+      if (!verdict) {
+        log(`  ⚠ LLM returned no valid JSON — skipping`);
+        errors++;
+        continue;
+      }
+      if (!verdict.shouldFix) {
+        log(`  ✓ LLM says these are distinct albums (${(verdict.confidence * 100).toFixed(0)}% conf) — skipping`);
+        continue;
+      }
     }
-    if (!verdict.shouldFix) {
-      log(`  ✓ LLM says these are distinct albums (${(verdict.confidence * 100).toFixed(0)}% conf) — skipping`);
-      continue;
-    }
+    const modelLabel = usedRule ? "rule-based" : llm.model;
 
     // For each variant whose name ≠ base, rename it to base.
     if (verdict.confidence >= 1.0) {
@@ -741,7 +783,7 @@ async function runBeetsDoctor() {
           proposedCommand: `beet modify -y album:<each-variant> album=${s.baseName}`,
           proposedArgs: JSON.stringify(s.parts.map((p) => p.album)),
           confidence: verdict.confidence,
-          llmModel: llm.model,
+          llmModel: modelLabel,
           reasoning: verdict.reasoning,
           status: "pending",
         }).run();
@@ -769,9 +811,9 @@ async function runBeetsDoctor() {
             beetsArgs: JSON.stringify(renameArgs),
             before: JSON.stringify(result.before || {}),
             after: JSON.stringify(result.after || {}),
-            source: "auto",
+            source: usedRule ? "rule" : "auto",
             confidence: verdict.confidence,
-            llmModel: llm.model,
+            llmModel: modelLabel,
             reasoning: verdict.reasoning,
             status: "applied",
           }).run();
@@ -799,7 +841,7 @@ async function runBeetsDoctor() {
         proposedCommand: `beet modify -y album:<each-variant> album=${s.baseName}`,
         proposedArgs: JSON.stringify(s.parts.map((p) => p.album)),
         confidence: verdict.confidence,
-        llmModel: llm.model,
+        llmModel: modelLabel,
         reasoning: verdict.reasoning,
         status: "pending",
       }).run();
@@ -832,20 +874,39 @@ async function runBeetsDoctor() {
     const albumLabel = j.album === null ? "(null)" : j.album === "" ? "(empty)" : j.album;
     log(`→ [${i + 1}/${junks.length}] reason=${j.reason}, album=${albumLabel}, title="${j.title}"`);
 
-    const verdict = await consultLLM(buildJunkPrompt(j));
-    if (!verdict) {
-      log(`  ⚠ LLM returned no valid JSON — skipping`);
-      errors++;
-      continue;
+    // RULE-FIRST: url-as-album and blank-album are unambiguous removes
+    // from beets DB (files on disk never touched — applyRemove strips
+    // -d/--delete). Single-track stubs need LLM judgement.
+    const junkRule = judgeJunk(j);
+    let verdict: LLMVerdict | null = null;
+    let usedRule = false;
+    if (junkRule.auto && junkRule.command) {
+      verdict = {
+        shouldFix: true,
+        confidence: 1.0,
+        command: "modify",
+        args: junkRule.command,
+        reasoning: junkRule.reasoning,
+      };
+      usedRule = true;
+      log(`  ▸ rule: ${junkRule.reasoning}`);
+    } else {
+      verdict = await consultLLM(buildJunkPrompt(j));
+      if (!verdict) {
+        log(`  ⚠ LLM returned no valid JSON — skipping`);
+        errors++;
+        continue;
+      }
+      // verdict.command can be "modify" | "remove" | "skip"
+      const cmd = (verdict as unknown as { command: string }).command;
+      if (cmd === "skip" || !verdict.shouldFix) {
+        log(`  ✓ LLM says leave alone (${(verdict.confidence * 100).toFixed(0)}% conf)`);
+        continue;
+      }
     }
-    // verdict.command can be "modify" | "remove" | "skip"
+    const modelLabel = usedRule ? "rule-based" : llm.model;
     const cmd = (verdict as unknown as { command: string }).command;
-    if (cmd === "skip" || !verdict.shouldFix) {
-      log(`  ✓ LLM says leave alone (${(verdict.confidence * 100).toFixed(0)}% conf)`);
-      continue;
-    }
-
-    const proposedAction = cmd === "remove" ? "remove" : "modify";
+    const proposedAction = cmd === "remove" || verdict.args[0] === "remove" ? "remove" : "modify";
     const targetForSnapshot = j.album || `id:${j.itemId}`;
 
     if (verdict.confidence >= 1.0) {
@@ -868,7 +929,7 @@ async function runBeetsDoctor() {
           proposedCommand: `beet ${verdict.args.join(" ")}`,
           proposedArgs: JSON.stringify(verdict.args),
           confidence: verdict.confidence,
-          llmModel: llm.model,
+          llmModel: modelLabel,
           reasoning: verdict.reasoning,
           status: "pending",
         }).run();
@@ -890,9 +951,9 @@ async function runBeetsDoctor() {
           beetsArgs: JSON.stringify(verdict.args),
           before: JSON.stringify(result.before || { itemId: j.itemId, album: j.album, title: j.title }),
           after: JSON.stringify(result.after || { removed: proposedAction === "remove" }),
-          source: "auto",
+          source: usedRule ? "rule" : "auto",
           confidence: verdict.confidence,
-          llmModel: llm.model,
+          llmModel: modelLabel,
           reasoning: verdict.reasoning,
           status: "applied",
         }).run();
@@ -919,7 +980,7 @@ async function runBeetsDoctor() {
         proposedCommand: `beet ${verdict.args.join(" ")}`,
         proposedArgs: JSON.stringify(verdict.args),
         confidence: verdict.confidence,
-        llmModel: llm.model,
+        llmModel: modelLabel,
         reasoning: verdict.reasoning,
         status: "pending",
       }).run();
