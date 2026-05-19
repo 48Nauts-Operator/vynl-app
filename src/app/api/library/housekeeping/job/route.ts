@@ -526,6 +526,19 @@ async function runBeetsDoctor() {
     // start returning non-JSON tokens (we saw qwen3.5 mix Chinese chars
     // into the middle of a JSON value, gemma do the same). One retry
     // with a curt "JSON ONLY" reminder almost always recovers.
+    //
+    // Reasoning models (qwen3, deepseek-r1, gpt-oss) emit a
+    // `<think>...</think>` block BEFORE the answer. Strip it before the
+    // regex; otherwise the regex grabs JSON-like fragments from inside
+    // the reasoning trace, or — worse — the answer JSON never gets
+    // emitted because max_tokens ran out mid-thought. We allow 2000
+    // tokens to give reasoning models headroom.
+    let lastRaw = "";
+    const stripReasoning = (s: string) =>
+      s.replace(/<think>[\s\S]*?<\/think>/gi, "")
+       .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "")
+       .trim();
+
     const attempt = async (variant: 0 | 1): Promise<LLMVerdict | null> => {
       const messages =
         variant === 0
@@ -540,11 +553,13 @@ async function runBeetsDoctor() {
             ];
       try {
         const text = await generateText({
-          maxTokens: 600,
+          maxTokens: 2000,
           jsonMode: true,
           messages,
         });
-        const match = text.match(/\{[\s\S]*\}/);
+        lastRaw = text;
+        const cleaned = stripReasoning(text);
+        const match = cleaned.match(/\{[\s\S]*\}/);
         if (!match) return null;
         const parsed = JSON.parse(match[0]) as LLMVerdict;
         parsed.confidence = Math.max(
@@ -564,6 +579,13 @@ async function runBeetsDoctor() {
       log(`  ↻ recovered on retry`);
       return retry;
     }
+    // Both attempts failed — surface a snippet of what the LLM actually
+    // said so the user can see whether it's empty, reasoning-only,
+    // markdown-wrapped, etc. without re-running with debug flags.
+    const snippet = (lastRaw || "(empty response)")
+      .slice(0, 400)
+      .replace(/\n/g, " \\n ");
+    log(`    raw[0..400]: ${snippet}`);
     return null;
   }
 

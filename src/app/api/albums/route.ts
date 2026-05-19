@@ -9,11 +9,15 @@ export async function GET(request: NextRequest) {
     const genre = request.nextUrl.searchParams.get("genre");
     const search = request.nextUrl.searchParams.get("search")?.trim();
     const limit = request.nextUrl.searchParams.get("limit");
-    // type: all | albums | compilations | singles
-    // - albums: multi-track, not a comp
-    // - compilations: any track flagged is_compilation=1 in the group
-    // - singles: exactly one track in the album group
-    const type = (request.nextUrl.searchParams.get("type") || "all").toLowerCase();
+    // types: comma-separated subset of [albums, compilations, singles].
+    // Missing/empty = all three (no filter). All three present = same as
+    // missing. Mix freely (e.g. ?types=albums,compilations excludes singles).
+    const typesRaw = (request.nextUrl.searchParams.get("types") || "")
+      .toLowerCase()
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const types = new Set(typesRaw);
 
     let query = `
       SELECT
@@ -56,21 +60,25 @@ export async function GET(request: NextRequest) {
     query += ` GROUP BY album, COALESCE(album_artist, artist)`;
 
     // Type filter via HAVING — applied after grouping so we can use
-    // MAX(is_compilation) and COUNT(*) aggregates.
-    switch (type) {
-      case "albums":
-        query += ` HAVING MAX(is_compilation) = 0 AND COUNT(*) >= 2`;
-        break;
-      case "compilations":
-        query += ` HAVING MAX(is_compilation) = 1`;
-        break;
-      case "singles":
-        query += ` HAVING COUNT(*) = 1`;
-        break;
-      case "all":
-      default:
-        // No HAVING — return everything.
-        break;
+    // MAX(is_compilation) and COUNT(*) aggregates. Multi-select: each
+    // requested type contributes an OR'd condition. All three (or none)
+    // means no HAVING.
+    const allTypes = ["albums", "compilations", "singles"];
+    const activeTypes = types.size === 0 || allTypes.every((t) => types.has(t))
+      ? []
+      : allTypes.filter((t) => types.has(t));
+    if (activeTypes.length > 0) {
+      const clauses = activeTypes.map((t) => {
+        switch (t) {
+          case "albums":       return `(MAX(is_compilation) = 0 AND COUNT(*) >= 2)`;
+          case "compilations": return `(MAX(is_compilation) = 1)`;
+          case "singles":      return `(COUNT(*) = 1)`;
+          default:             return null;
+        }
+      }).filter(Boolean);
+      if (clauses.length > 0) {
+        query += ` HAVING ` + clauses.join(" OR ");
+      }
     }
 
     switch (sort) {

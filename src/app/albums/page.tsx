@@ -40,14 +40,25 @@ interface Album {
   is_compilation: number;
 }
 
-type AlbumType = "all" | "albums" | "compilations" | "singles";
+type AlbumType = "albums" | "compilations" | "singles";
+
+const ALBUM_TYPE_LABELS: { id: AlbumType; label: string }[] = [
+  { id: "albums", label: "Albums" },
+  { id: "compilations", label: "Compilations" },
+  { id: "singles", label: "Singles" },
+];
 
 export default function AlbumsPage() {
   const [albums, setAlbums] = useState<Album[]>([]);
   const [genres, setGenres] = useState<string[]>([]);
   const [sort, setSort] = useState("artist");
   const [genre, setGenre] = useState<string | null>(null);
-  const [type, setType] = useState<AlbumType>("all");
+  // Multi-select toggle: each type is independently on/off. All three on
+  // by default = show everything (no API filter). Mirrors the visual
+  // "On Air" buttons.
+  const [activeTypes, setActiveTypes] = useState<Set<AlbumType>>(
+    new Set(["albums", "compilations", "singles"])
+  );
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [loading, setLoading] = useState(true);
@@ -93,7 +104,14 @@ export default function AlbumsPage() {
       const params = new URLSearchParams({ sort });
       if (genre) params.set("genre", genre);
       if (search.trim()) params.set("search", search.trim());
-      if (type !== "all") params.set("type", type);
+      // Send types only when it's not the default all-three (otherwise
+      // omit to let the API skip the HAVING clause entirely).
+      if (activeTypes.size > 0 && activeTypes.size < 3) {
+        params.set("types", Array.from(activeTypes).join(","));
+      } else if (activeTypes.size === 0) {
+        // All toggles off = explicit empty filter (returns nothing).
+        params.set("types", "none");
+      }
       const res = await fetch(`/api/albums?${params}`);
       const data = await res.json();
       setAlbums(data.albums || []);
@@ -103,7 +121,16 @@ export default function AlbumsPage() {
     // Debounce search input
     const timer = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(timer);
-  }, [sort, genre, search, type]);
+  }, [sort, genre, search, activeTypes]);
+
+  const toggleType = (id: AlbumType) => {
+    setActiveTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   // Close context menu on click elsewhere
   useEffect(() => {
@@ -236,17 +263,39 @@ export default function AlbumsPage() {
             )}
           </div>
           <GenreFilter genres={genres} value={genre} onChange={setGenre} />
-          <Select value={type} onValueChange={(v) => setType(v as AlbumType)}>
-            <SelectTrigger className="w-[150px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="albums">Albums</SelectItem>
-              <SelectItem value="compilations">Compilations</SelectItem>
-              <SelectItem value="singles">Singles</SelectItem>
-            </SelectContent>
-          </Select>
+          {/* "On Air" style neon toggles — all lit = show everything; tap
+              to dim a category out of the view. Purple/pink palette
+              matches the existing splash screen glow. */}
+          <div className="flex items-center gap-1 rounded-md border border-border bg-black/20 p-1">
+            {ALBUM_TYPE_LABELS.map(({ id, label }) => {
+              const on = activeTypes.has(id);
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => toggleType(id)}
+                  className={
+                    "relative px-3 py-1.5 rounded-sm text-xs font-semibold uppercase tracking-wide transition-all duration-200 " +
+                    (on
+                      ? "text-[#f0abfc] bg-[#a855f7]/10 shadow-[inset_0_0_10px_rgba(168,85,247,0.35),0_0_14px_rgba(236,72,153,0.5)]"
+                      : "text-muted-foreground/60 hover:text-foreground/80")
+                  }
+                  aria-pressed={on}
+                  title={on ? `Showing ${label}. Click to hide.` : `Hidden. Click to show ${label}.`}
+                >
+                  <span
+                    className={
+                      "inline-block w-1.5 h-1.5 rounded-full mr-1.5 align-middle transition-all " +
+                      (on
+                        ? "bg-[#ec4899] shadow-[0_0_8px_#ec4899,0_0_2px_#fff] animate-pulse"
+                        : "bg-muted-foreground/30")
+                    }
+                  />
+                  {label}
+                </button>
+              );
+            })}
+          </div>
           <Select value={sort} onValueChange={setSort}>
             <SelectTrigger className="w-[160px]">
               <SelectValue />
