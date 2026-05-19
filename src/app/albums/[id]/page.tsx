@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { usePlayerStore, Track as PlayerTrack } from "@/store/player";
-import { Play, Pause, Shuffle, Disc3, Loader2, Clock, ImageIcon, Pencil, Archive, ListPlus, Star, ChevronsUpDown, ChevronUp, ChevronDown } from "lucide-react";
+import { Play, Pause, Shuffle, Disc3, Loader2, Clock, ImageIcon, Pencil, Archive, ListPlus, Star, ChevronsUpDown, ChevronUp, ChevronDown, ArrowLeft } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatDuration } from "@/lib/utils";
 import { CoverSearchDialog } from "@/components/albums/CoverSearchDialog";
@@ -98,6 +98,7 @@ function EqualizerBars({ paused }: { paused: boolean }) {
 }
 
 export default function AlbumDetailPage() {
+  const router = useRouter();
   const params = useParams();
   const [album, setAlbum] = useState<AlbumDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -301,8 +302,28 @@ export default function AlbumDetailPage() {
   // Group by disc if multiple discs
   const hasMultipleDiscs = new Set(album.tracks.map((t) => t.discNumber)).size > 1;
 
+  // Back button: prefer browser history so user returns to whatever
+  // they came from (search results, filtered Albums view, an artist
+  // page, etc). Falls back to /albums if history is empty (e.g. user
+  // landed on this URL directly).
+  const handleBack = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push("/albums");
+    }
+  };
+
   return (
     <div className="space-y-6">
+      <button
+        type="button"
+        onClick={handleBack}
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back
+      </button>
       {/* Hero */}
       <div className="flex gap-6 items-end">
         <div className="relative w-56 h-56 rounded-lg bg-secondary flex items-center justify-center overflow-hidden shrink-0 shadow-2xl group">
