@@ -83,16 +83,30 @@ export async function applyModify(
 ): Promise<ApplyResult> {
   const before = snapshotAlbum(albumName);
 
-  // Sanity: first arg must be "modify" (the only command we apply this way).
+  // Normalize: some LLMs (minimax-m2 observed) drop the "modify" verb
+  // and start args directly with "-y" or "album:...". Inject it back in
+  // so the command actually runs. Also reject if the LLM tried to slip
+  // in a different verb (e.g. "remove", "update", "import") — those
+  // need their own apply path.
+  const SAFE_PREPEND = new Set(["-y", "--yes", "-a", "--album"]);
+  if (args.length === 0) {
+    return { success: false, before, error: "applyModify got empty args" };
+  }
+  let normalized = args;
   if (args[0] !== "modify") {
-    return {
-      success: false,
-      before,
-      error: `applyModify only handles modify commands, got: ${args[0]}`,
-    };
+    if (SAFE_PREPEND.has(args[0]) || args[0].includes(":") || args[0].includes("=")) {
+      // Looks like flags/query/assignment — LLM forgot the verb. Add it.
+      normalized = ["modify", ...args];
+    } else {
+      return {
+        success: false,
+        before,
+        error: `applyModify only handles modify commands, got first arg: ${args[0]}`,
+      };
+    }
   }
 
-  const result = await runBeet(args);
+  const result = await runBeet(normalized);
   if (result.exitCode !== 0) {
     return {
       success: false,
@@ -106,7 +120,7 @@ export async function applyModify(
 
   // After-snapshot uses the NEW album name if the modify renamed it.
   // Detect by scanning args for "album=NEW" assignment.
-  const renameArg = args.find((a) => a.startsWith("album="));
+  const renameArg = normalized.find((a) => a.startsWith("album="));
   const newAlbumName = renameArg ? renameArg.slice("album=".length) : albumName;
   const after = snapshotAlbum(newAlbumName);
 
