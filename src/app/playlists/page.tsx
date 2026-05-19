@@ -459,6 +459,9 @@ export default function PlaylistsPage() {
                             rating={ratingsMap[track.id] ?? null}
                             onChange={(r) => handleRateTrack(track.id, r)}
                             size="sm"
+                            trackId={track.id}
+                            trackTitle={track.title}
+                            trackSubtitle={track.artist}
                           />
                         </div>
                         <span className="text-sm text-muted-foreground">
@@ -583,6 +586,9 @@ export default function PlaylistsPage() {
                                   rating={ratingsMap[track.id] ?? null}
                                   onChange={(r) => handleRateTrack(track.id, r)}
                                   size="sm"
+                                  trackId={track.id}
+                                  trackTitle={track.title}
+                                  trackSubtitle={`${track.artist} — ${track.album}`}
                                 />
                               </td>
                               <td className="px-4 py-2.5 text-right text-muted-foreground">

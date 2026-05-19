@@ -487,6 +487,9 @@ export default function AlbumDetailPage() {
                       rating={ratingsMap[track.id] ?? null}
                       onChange={(r) => handleRateTrack(track.id, r)}
                       size="sm"
+                      trackId={track.id}
+                      trackTitle={track.title}
+                      trackSubtitle={`${track.artist} — ${album.album}`}
                     />
                   </div>
                   <span className={`text-sm text-right ${isActive ? "text-primary/70" : "text-muted-foreground"}`}>
@@ -524,6 +527,9 @@ export default function AlbumDetailPage() {
                 setTrackMenu(null);
               }}
               size="sm"
+              trackId={trackMenu.track.id}
+              trackTitle={trackMenu.track.title}
+              trackSubtitle={`${trackMenu.track.artist} — ${album.album}`}
             />
           </div>
           <button

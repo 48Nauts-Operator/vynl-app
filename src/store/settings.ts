@@ -13,10 +13,22 @@ export interface FeatureFlags {
   developerMode: boolean;
 }
 
+export interface UIPreferences {
+  /** Play the full-screen 5-star celebration when the purple vynl is
+   *  clicked. Default on. When off, the click still adds the track
+   *  to the All-Time Songs playlist but skips the animation. */
+  celebrateFiveStar: boolean;
+}
+
 interface SettingsState {
   features: FeatureFlags;
+  ui: UIPreferences;
   toggleFeature: (key: keyof FeatureFlags) => void;
   setFeature: (key: keyof FeatureFlags, value: boolean) => void;
+  setUIPreference: <K extends keyof UIPreferences>(
+    key: K,
+    value: UIPreferences[K]
+  ) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -31,6 +43,9 @@ export const useSettingsStore = create<SettingsState>()(
         playlists: true,
         developerMode: false,
       },
+      ui: {
+        celebrateFiveStar: true,
+      },
       toggleFeature: (key) =>
         set((state) => ({
           features: { ...state.features, [key]: !state.features[key] },
@@ -38,6 +53,10 @@ export const useSettingsStore = create<SettingsState>()(
       setFeature: (key, value) =>
         set((state) => ({
           features: { ...state.features, [key]: value },
+        })),
+      setUIPreference: (key, value) =>
+        set((state) => ({
+          ui: { ...state.ui, [key]: value },
         })),
     }),
     {
