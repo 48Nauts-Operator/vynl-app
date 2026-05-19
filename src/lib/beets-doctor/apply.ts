@@ -7,6 +7,7 @@
 
 import { spawn } from "child_process";
 import Database from "better-sqlite3";
+import { db as vynlDb } from "@/lib/db";
 
 // In Docker the beets venv lives at /opt/vynl-venv/bin/beet; on Mac dev
 // it's usually wherever `which beet` resolves. BEETS_BIN env var lets you
@@ -122,6 +123,22 @@ export async function applyModify(
   // Detect by scanning args for "album=NEW" assignment.
   const renameArg = normalized.find((a) => a.startsWith("album="));
   const newAlbumName = renameArg ? renameArg.slice("album=".length) : albumName;
+
+  // Push the change out to file tags so the audio files reflect what
+  // beets just recorded. Without this the FS still has the old TCMP /
+  // albumartist tags and Vynl's next Refresh Metadata pass would
+  // overwrite the beets change. Failure here is logged but non-fatal
+  // — the beets DB is still updated.
+  const writeResult = await runBeet(["write", `album:${newAlbumName}`]);
+  const writeOk = writeResult.exitCode === 0;
+
+  // Sync Vynl's tracks table for this album so the UI reflects the
+  // change immediately without requiring a full Refresh Metadata
+  // sweep. We translate any field=value pairs from the LLM's args
+  // into a Drizzle update. Renames are also applied so the row
+  // matches on the new album name afterwards.
+  syncVynlTracksFromArgs(normalized, albumName);
+
   const after = snapshotAlbum(newAlbumName);
 
   return {
@@ -129,9 +146,73 @@ export async function applyModify(
     before,
     after,
     stdout: result.stdout.slice(-2000),
-    stderr: result.stderr.slice(-1000),
+    stderr: result.stderr.slice(-1000) + (writeOk ? "" : ` [beet write failed: ${writeResult.stderr.slice(-500)}]`),
     exitCode: result.exitCode,
   };
+}
+
+/** Mirror a beet-modify into Vynl's tracks table so the UI doesn't show
+ *  stale data until the next full Refresh Metadata. Translates the
+ *  field=value pairs we recognise; unknown fields are skipped silently
+ *  (they'll catch up on the next refresh).
+ *
+ *  Mapping:
+ *    albumartist=X   -> tracks.album_artist
+ *    comp=1 / comp=0 -> tracks.is_compilation
+ *    genres=X        -> tracks.genre  (Vynl stores one primary)
+ *    album=X         -> tracks.album  (rename; matched on old name)
+ *    year=NNNN       -> tracks.year
+ */
+function syncVynlTracksFromArgs(args: string[], oldAlbumName: string): void {
+  const set: Record<string, string | number | boolean | null> = {};
+  let newAlbum: string | null = null;
+  for (const a of args) {
+    const eq = a.indexOf("=");
+    if (eq < 0) continue;
+    const key = a.slice(0, eq);
+    const val = a.slice(eq + 1);
+    switch (key) {
+      case "albumartist":
+        set.album_artist = val;
+        break;
+      case "comp":
+        set.is_compilation = val === "1" || val.toLowerCase() === "true";
+        break;
+      case "genres":
+      case "genre":
+        set.genre = val;
+        break;
+      case "year":
+        set.year = parseInt(val, 10) || null;
+        break;
+      case "album":
+        newAlbum = val;
+        set.album = val;
+        break;
+    }
+  }
+  if (Object.keys(set).length === 0) return;
+  try {
+    const setClauses = Object.keys(set)
+      .map((k) => `${k} = ?`)
+      .join(", ");
+    const values = Object.values(set);
+    const stmt = `UPDATE tracks SET ${setClauses} WHERE album = ?`;
+    // Go through the underlying better-sqlite3 client for parameterised
+    // execution — simpler than Drizzle's column-name field map for an
+    // update keyed on snake_case columns.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sqlite = (vynlDb as any).session?.client || (vynlDb as any).$client;
+    if (sqlite) {
+      sqlite.prepare(stmt).run(...values, oldAlbumName);
+    }
+    // Silence unused var if rename path doesn't fire (newAlbum is the
+    // post-rename name; we set tracks.album to it above already).
+    void newAlbum;
+  } catch (err) {
+    // Sync failure is non-fatal; next Refresh Metadata will reconcile.
+    console.error("syncVynlTracksFromArgs failed:", err);
+  }
 }
 
 /** Delete an item from the beets DB. `-d` would also delete the file —
