@@ -51,6 +51,8 @@ interface AlbumDetail {
   coverPath: string | null;
   trackCount: number;
   totalDuration: number;
+  isCompilation?: boolean;
+  albumType?: "compilation" | "single" | "album";
   tracks: AlbumTrack[];
 }
 
@@ -324,8 +326,19 @@ export default function AlbumDetailPage() {
           </button>
         </div>
         <div className="space-y-3">
-          <p className="text-sm uppercase tracking-wider text-muted-foreground">
-            Album
+          <p
+            className={
+              "text-sm uppercase tracking-wider " +
+              (album.albumType === "compilation"
+                ? "text-[#ec4899] font-semibold"
+                : "text-muted-foreground")
+            }
+          >
+            {album.albumType === "compilation"
+              ? "Compilation"
+              : album.albumType === "single"
+                ? "Single"
+                : "Album"}
           </p>
           <h1 className="text-4xl font-bold">{album.album}</h1>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
