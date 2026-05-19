@@ -660,7 +660,13 @@ async function runBeetsDoctor() {
           reasoning: verdict.reasoning,
           status: "applied",
         }).run();
-        log(`  ✓ applied — ${verdict.reasoning}`);
+        const sync =
+          result.vynlRowsUpdated === null || result.vynlRowsUpdated === undefined
+            ? "(Vynl sync skipped)"
+            : result.vynlRowsUpdated === 0
+              ? "⚠ Vynl sync matched 0 rows — Refresh Metadata needed"
+              : `Vynl sync: ${result.vynlRowsUpdated} rows`;
+        log(`  ✓ applied — ${verdict.reasoning} [${sync}]`);
         autoApplied++;
       } else {
         log(`  ✗ apply failed: ${result.error}`);

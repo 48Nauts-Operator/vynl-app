@@ -55,10 +55,34 @@ export default function AlbumsPage() {
   const [genre, setGenre] = useState<string | null>(null);
   // Multi-select toggle: each type is independently on/off. All three on
   // by default = show everything (no API filter). Mirrors the visual
-  // "On Air" buttons.
-  const [activeTypes, setActiveTypes] = useState<Set<AlbumType>>(
-    new Set(["albums", "compilations", "singles"])
-  );
+  // "On Air" buttons. Persisted to localStorage so navigating away and
+  // back preserves the last-set state (without it the filters reset to
+  // all-on on every mount, which is annoying when iterating).
+  const ALBUM_TYPES_STORAGE_KEY = "vynl:albums:activeTypes";
+  const [activeTypes, setActiveTypes] = useState<Set<AlbumType>>(() => {
+    if (typeof window === "undefined") {
+      return new Set(["albums", "compilations", "singles"]);
+    }
+    try {
+      const raw = window.localStorage.getItem(ALBUM_TYPES_STORAGE_KEY);
+      if (!raw) return new Set(["albums", "compilations", "singles"]);
+      const arr = JSON.parse(raw) as string[];
+      const valid: AlbumType[] = ["albums", "compilations", "singles"];
+      const filtered = arr.filter((t): t is AlbumType => valid.includes(t as AlbumType));
+      return new Set(filtered);
+    } catch {
+      return new Set(["albums", "compilations", "singles"]);
+    }
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        ALBUM_TYPES_STORAGE_KEY,
+        JSON.stringify(Array.from(activeTypes))
+      );
+    } catch { /* quota / privacy mode — ignore */ }
+  }, [activeTypes]);
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [loading, setLoading] = useState(true);
@@ -365,6 +389,14 @@ export default function AlbumsPage() {
                         ) : (
                           <Disc3 className="h-10 w-10 text-muted-foreground" />
                         )}
+                        {album.is_compilation === 1 && (
+                          <span
+                            className="absolute top-2 left-2 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded text-[#fdf4ff] bg-black/60 backdrop-blur-sm border border-[#a855f7]/60 shadow-[0_0_8px_rgba(236,72,153,0.5)]"
+                            title="Compilation (Various Artists)"
+                          >
+                            VA
+                          </span>
+                        )}
                         <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           <Button
                             size="icon"
@@ -435,7 +467,17 @@ export default function AlbumsPage() {
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate text-sm">{album.album}</p>
+                      <p className="font-medium truncate text-sm flex items-center gap-1.5">
+                        {album.is_compilation === 1 && (
+                          <span
+                            className="text-[9px] font-bold uppercase tracking-wider px-1 py-px rounded text-[#fdf4ff] bg-[#a855f7]/15 border border-[#a855f7]/60 shadow-[0_0_6px_rgba(236,72,153,0.4)] shrink-0"
+                            title="Compilation (Various Artists)"
+                          >
+                            VA
+                          </span>
+                        )}
+                        <span className="truncate">{album.album}</span>
+                      </p>
                       <p className="text-xs text-muted-foreground truncate">
                         {album.album_artist}
                         {album.year ? ` · ${album.year}` : ""}

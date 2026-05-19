@@ -23,6 +23,10 @@ export interface ApplyResult {
   stderr?: string;
   exitCode?: number | null;
   error?: string;
+  /** Number of Vynl tracks rows updated by the inline sync helper.
+   *  null = sync wasn't attempted; 0 = attempted but matched no rows
+   *  (likely an album-name mismatch between beets and Vynl). */
+  vynlRowsUpdated?: number | null;
 }
 
 /** Run `beet <args>` and capture stdout/stderr. */
@@ -137,7 +141,7 @@ export async function applyModify(
   // sweep. We translate any field=value pairs from the LLM's args
   // into a Drizzle update. Renames are also applied so the row
   // matches on the new album name afterwards.
-  syncVynlTracksFromArgs(normalized, albumName);
+  const vynlRowsUpdated = syncVynlTracksFromArgs(normalized, albumName);
 
   const after = snapshotAlbum(newAlbumName);
 
@@ -148,6 +152,7 @@ export async function applyModify(
     stdout: result.stdout.slice(-2000),
     stderr: result.stderr.slice(-1000) + (writeOk ? "" : ` [beet write failed: ${writeResult.stderr.slice(-500)}]`),
     exitCode: result.exitCode,
+    vynlRowsUpdated,
   };
 }
 
@@ -163,7 +168,7 @@ export async function applyModify(
  *    album=X         -> tracks.album  (rename; matched on old name)
  *    year=NNNN       -> tracks.year
  */
-function syncVynlTracksFromArgs(args: string[], oldAlbumName: string): void {
+function syncVynlTracksFromArgs(args: string[], oldAlbumName: string): number | null {
   const set: Record<string, string | number | boolean | null> = {};
   let newAlbum: string | null = null;
   for (const a of args) {
@@ -176,7 +181,7 @@ function syncVynlTracksFromArgs(args: string[], oldAlbumName: string): void {
         set.album_artist = val;
         break;
       case "comp":
-        set.is_compilation = val === "1" || val.toLowerCase() === "true";
+        set.is_compilation = val === "1" || val.toLowerCase() === "true" ? 1 : 0;
         break;
       case "genres":
       case "genre":
@@ -191,7 +196,8 @@ function syncVynlTracksFromArgs(args: string[], oldAlbumName: string): void {
         break;
     }
   }
-  if (Object.keys(set).length === 0) return;
+  void newAlbum;
+  if (Object.keys(set).length === 0) return null;
   try {
     const setClauses = Object.keys(set)
       .map((k) => `${k} = ?`)
@@ -203,15 +209,16 @@ function syncVynlTracksFromArgs(args: string[], oldAlbumName: string): void {
     // update keyed on snake_case columns.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sqlite = (vynlDb as any).session?.client || (vynlDb as any).$client;
-    if (sqlite) {
-      sqlite.prepare(stmt).run(...values, oldAlbumName);
+    if (!sqlite) {
+      console.warn("syncVynlTracksFromArgs: could not obtain underlying sqlite client");
+      return null;
     }
-    // Silence unused var if rename path doesn't fire (newAlbum is the
-    // post-rename name; we set tracks.album to it above already).
-    void newAlbum;
+    const result = sqlite.prepare(stmt).run(...values, oldAlbumName);
+    return typeof result.changes === "number" ? result.changes : null;
   } catch (err) {
     // Sync failure is non-fatal; next Refresh Metadata will reconcile.
     console.error("syncVynlTracksFromArgs failed:", err);
+    return null;
   }
 }
 
