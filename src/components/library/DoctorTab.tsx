@@ -61,6 +61,16 @@ export function DoctorTab() {
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [actingOnId, setActingOnId] = useState<number | null>(null);
+  // Most recent accept/dismiss error, surfaced as an inline banner so
+  // failures aren't silent (previously: button click → nothing visible).
+  const [actError, setActError] = useState<string | null>(null);
+  // Per-attempt result tracker for bulkAct, so we can show "23 of 28
+  // succeeded, 5 failed — first error: <message>" instead of a silent refresh.
+  const [bulkResult, setBulkResult] = useState<{
+    succeeded: number;
+    failed: number;
+    firstError: string | null;
+  } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkActing, setBulkActing] = useState(false);
 
@@ -205,13 +215,22 @@ export function DoctorTab() {
 
   const act = async (id: number, action: "accept" | "dismiss") => {
     setActingOnId(id);
+    setActError(null);
     try {
-      await fetch(`/api/beetsai/review/${id}`, {
+      const res = await fetch(`/api/beetsai/review/${id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
       });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        setActError(`Review #${id} ${action} failed: HTTP ${res.status} — ${body.slice(0, 200)}`);
+        console.error("review act failed", { id, action, status: res.status, body });
+      }
       await loadReviews();
+    } catch (err) {
+      setActError(`Review #${id} ${action} threw: ${String(err)}`);
+      console.error("review act threw", err);
     } finally {
       setActingOnId(null);
     }
@@ -234,20 +253,41 @@ export function DoctorTab() {
   const bulkAct = async (action: "accept" | "dismiss") => {
     if (selectedIds.size === 0) return;
     setBulkActing(true);
+    setActError(null);
+    setBulkResult(null);
     const ids = Array.from(selectedIds);
+    let succeeded = 0;
+    let failed = 0;
+    let firstError: string | null = null;
     try {
-      // Issue them in parallel — server is fine with concurrent
-      // single-row updates; if a beet apply fails on one it just stays
-      // pending and the next loadReviews() reveals what's left.
-      await Promise.all(
-        ids.map((id) =>
-          fetch(`/api/beetsai/review/${id}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action }),
-          }).catch(() => null)
-        )
+      // Issue in parallel; collect per-response results so we can show
+      // the user a real summary instead of a silent list refresh.
+      const results = await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const res = await fetch(`/api/beetsai/review/${id}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action }),
+            });
+            if (!res.ok) {
+              const body = await res.text().catch(() => "");
+              return { id, ok: false, error: `HTTP ${res.status} — ${body.slice(0, 160)}` };
+            }
+            return { id, ok: true, error: null as string | null };
+          } catch (err) {
+            return { id, ok: false, error: String(err).slice(0, 160) };
+          }
+        })
       );
+      for (const r of results) {
+        if (r.ok) succeeded++;
+        else {
+          failed++;
+          if (!firstError) firstError = `#${r.id}: ${r.error}`;
+        }
+      }
+      setBulkResult({ succeeded, failed, firstError });
       setSelectedIds(new Set());
       await loadReviews();
     } finally {
@@ -356,6 +396,55 @@ export function DoctorTab() {
           </div>
         </CardHeader>
         <CardContent>
+          {/* Surface accept/dismiss failures so the user isn't left wondering
+              why nothing happened. Previously these were silent. */}
+          {actError && (
+            <div className="mb-3 p-2 rounded-md border border-red-500/40 bg-red-500/5 text-xs font-mono break-words">
+              <div className="flex items-start justify-between gap-2">
+                <span className="text-red-300">{actError}</span>
+                <button
+                  type="button"
+                  onClick={() => setActError(null)}
+                  className="text-muted-foreground hover:text-foreground shrink-0"
+                  aria-label="dismiss error"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          )}
+          {bulkResult && (bulkResult.succeeded > 0 || bulkResult.failed > 0) && (
+            <div
+              className={
+                "mb-3 p-2 rounded-md border text-xs " +
+                (bulkResult.failed === 0
+                  ? "border-emerald-500/40 bg-emerald-500/5 text-emerald-300"
+                  : "border-amber-500/40 bg-amber-500/5 text-amber-200")
+              }
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div>
+                    Bulk action: <b>{bulkResult.succeeded}</b> succeeded ·{" "}
+                    <b>{bulkResult.failed}</b> failed
+                  </div>
+                  {bulkResult.firstError && (
+                    <div className="font-mono mt-1 break-words">
+                      first error → {bulkResult.firstError}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setBulkResult(null)}
+                  className="text-muted-foreground hover:text-foreground shrink-0"
+                  aria-label="dismiss"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          )}
           {reviews.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No items waiting for review. Run a scan and the LLM will queue anything it&apos;s not 100% sure about.
