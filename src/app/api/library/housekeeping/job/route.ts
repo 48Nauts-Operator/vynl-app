@@ -350,53 +350,42 @@ async function runFetchArtwork() {
 
     if (coverSaved) continue;
 
-    // Step 2: Search iTunes API
+    // Step 2: Multi-provider cover search (CAA + Deezer + iTunes).
+    // iTunes throttles aggressively so we no longer depend on it
+    // exclusively. searchCoverArt() de-duplicates across providers
+    // and returns the best hit list ordered by source quality.
     try {
+      const { searchCoverArt } = await import("@/lib/cover-art");
       const query = `${album.album_artist} ${album.album}`;
-      const url = `https://itunes.apple.com/search?${new URLSearchParams({
-        term: query,
-        entity: "album",
-        limit: "3",
-      })}`;
-
-      const res = await fetch(url);
-      if (!res.ok) {
-        log(`  \u26a0 iTunes API returned ${res.status}`);
-        errors++;
-        continue;
-      }
-
-      const data = await res.json();
-      const results = data.results || [];
+      const results = await searchCoverArt(query);
 
       if (results.length > 0) {
-        // Use the first result's artwork
-        const artworkUrl = results[0].artworkUrl100?.replace("100x100", "600x600") || results[0].artworkUrl100;
+        const top = results[0];
+        const imgRes = await fetch(top.artworkUrl);
+        if (imgRes.ok) {
+          const buffer = Buffer.from(await imgRes.arrayBuffer());
+          const hash = crypto.createHash("md5").update(album.album + album.album_artist).digest("hex");
+          // CAA serves PNG sometimes, Deezer/iTunes JPG. .jpg ext is
+          // fine for /covers/ static serving \u2014 browser sniffs the
+          // bytes anyway.
+          const filename = `${hash}.jpg`;
+          fs.writeFileSync(path.join(coversDir, filename), buffer);
+          const coverPath = `/covers/${filename}`;
 
-        if (artworkUrl) {
-          const imgRes = await fetch(artworkUrl);
-          if (imgRes.ok) {
-            const buffer = Buffer.from(await imgRes.arrayBuffer());
-            const hash = crypto.createHash("md5").update(album.album + album.album_artist).digest("hex");
-            const filename = `${hash}.jpg`;
-            fs.writeFileSync(path.join(coversDir, filename), buffer);
-            const coverPath = `/covers/${filename}`;
-
-            for (const tid of trackIds) {
-              sqlite.prepare(`UPDATE tracks SET cover_path = ? WHERE id = ?`).run(coverPath, tid);
-            }
-            log(`  \u2713 Downloaded from iTunes`);
-            found++;
-            continue;
+          for (const tid of trackIds) {
+            sqlite.prepare(`UPDATE tracks SET cover_path = ? WHERE id = ?`).run(coverPath, tid);
           }
+          log(`  \u2713 Downloaded from ${top.source}`);
+          found++;
+          continue;
         }
       }
 
-      log(`  \u26a0 No cover found`);
+      log(`  \u26a0 No cover found across CAA / Deezer / iTunes`);
       notFound++;
 
-      // Rate limit: small delay between iTunes API calls
-      await new Promise((r) => setTimeout(r, 300));
+      // Small delay between rounds \u2014 MusicBrainz wants 1 req/sec.
+      await new Promise((r) => setTimeout(r, 1100));
     } catch (err) {
       log(`  \u2717 Error: ${String(err).split("\n")[0]}`);
       errors++;
