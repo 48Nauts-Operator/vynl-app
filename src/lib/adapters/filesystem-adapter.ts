@@ -59,11 +59,18 @@ export class FilesystemAdapter implements MusicSourceAdapter {
           };
         }
 
+        // Compilation detection: prefer the iTunes TCMP tag, fall back to
+        // an albumartist heuristic for files that never had TCMP written.
+        const albumArtistRaw = common.albumartist || undefined;
+        const isCompilation =
+          common.compilation === true ||
+          (albumArtistRaw || "").toLowerCase().includes("various");
+
         yield {
           title: common.title || path.basename(filePath, path.extname(filePath)),
           artist: common.artist || "Unknown Artist",
           album: common.album || "Unknown Album",
-          albumArtist: common.albumartist || undefined,
+          albumArtist: albumArtistRaw,
           genre: common.genre?.[0] || undefined,
           year: common.year || undefined,
           trackNumber: common.track?.no || undefined,
@@ -74,6 +81,7 @@ export class FilesystemAdapter implements MusicSourceAdapter {
           format: path.extname(filePath).slice(1).toUpperCase(),
           bitrate: format.bitrate ? Math.round(format.bitrate / 1000) : undefined,
           sampleRate: format.sampleRate || undefined,
+          isCompilation,
           coverData,
         };
       } catch (err) {

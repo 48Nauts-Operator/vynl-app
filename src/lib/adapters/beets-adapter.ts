@@ -173,12 +173,14 @@ export class BeetsAdapter implements MusicSourceAdapter {
         const albumArtist = row.comp
           ? "Various Artists"
           : (row.albumartist || undefined);
+        const isCompilation = Boolean(row.comp);
 
         yield {
           title: row.title || path.basename(filePath, path.extname(filePath)),
           artist: row.artist || "Unknown Artist",
           album: row.album || "Unknown Album",
           albumArtist,
+          isCompilation,
           genre: row.genre || undefined,
           year: row.year || undefined,
           trackNumber: row.track || undefined,
