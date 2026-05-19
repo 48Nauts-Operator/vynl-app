@@ -405,4 +405,8 @@ try { sqlite.prepare(`ALTER TABLE wish_list ADD COLUMN popularity INTEGER`).run(
 // will start writing the real value in PR 2.
 try { sqlite.prepare(`ALTER TABLE tracks ADD COLUMN is_compilation INTEGER DEFAULT 0`).run(); } catch { /* already exists */ }
 
+// Playlist sections: optional user-defined grouping (Sport / Xmas / etc).
+// "All Time" is the reserved pinned-top section.
+try { sqlite.prepare(`ALTER TABLE playlists ADD COLUMN section TEXT`).run(); } catch { /* already exists */ }
+
 export { schema };

@@ -44,13 +44,26 @@ export async function PUT(
   const { id } = await params;
   const playlistId = parseInt(id);
   const body = await request.json();
-  const { name, description, coverPath, trackIds } = body;
+  const { name, description, coverPath, section, trackIds } = body;
+
+  // Normalise section: empty string / "Uncategorized" sentinel → null
+  // (so the row groups under "Uncategorized" in the UI). Anything else
+  // is trimmed user-typed text.
+  let normalisedSection: string | null | undefined = undefined;
+  if (section !== undefined) {
+    const trimmed = typeof section === "string" ? section.trim() : "";
+    normalisedSection =
+      trimmed === "" || trimmed.toLowerCase() === "uncategorized"
+        ? null
+        : trimmed;
+  }
 
   db.update(playlists)
     .set({
       ...(name && { name }),
       ...(description !== undefined && { description }),
       ...(coverPath && { coverPath }),
+      ...(normalisedSection !== undefined && { section: normalisedSection }),
       updatedAt: new Date().toISOString(),
     })
     .where(eq(playlists.id, playlistId))

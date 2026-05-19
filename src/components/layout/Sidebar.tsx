@@ -58,12 +58,17 @@ const navEntries: NavEntry[] = [
   { href: "/", label: "Home", icon: Home },
   { href: "/albums", label: "Albums", icon: Disc3 },
   { href: "/artists", label: "Artists", icon: Mic2 },
-  { href: "/discover", label: "Discover", icon: Compass, featureKey: "discover" },
   { href: "/playlists", label: "Playlists", icon: ListMusic, featureKey: "playlists" },
-  { href: "/wishlist", label: "Wishlist", icon: Heart },
   { href: "/podcasts", label: "Podcasts", icon: Podcast, featureKey: "podcasts" },
-  { href: "/youtube", label: "YouTube", icon: Youtube, featureKey: "youtube" },
-  { href: "/profile", label: "Taste Profile", icon: User, featureKey: "tasteProfile" },
+  {
+    group: "Discovery",
+    items: [
+      { href: "/discover", label: "Discover", icon: Compass, featureKey: "discover" },
+      { href: "/wishlist", label: "Wishlist", icon: Heart },
+      { href: "/profile", label: "Taste Profile", icon: User, featureKey: "tasteProfile" },
+      { href: "/youtube", label: "YouTube", icon: Youtube, featureKey: "youtube" },
+    ],
+  },
   {
     group: "Party",
     items: [
@@ -137,6 +142,7 @@ export function Sidebar() {
   // sidebar layout survives page navigation. Default: both sections
   // open on first load.
   const [sectionsOpen, setSectionsOpen] = useState<Record<string, boolean>>({
+    Discovery: true,
     Party: true,
     "Admin & Housekeeping": true,
   });

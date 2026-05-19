@@ -134,18 +134,52 @@ export async function POST(
       .run();
   }
 
+  // STRICT-ACCEPT INVARIANT: a review row only flips to "accepted" if
+  // every apply succeeded AND the apply actually had an effect (exit
+  // code 0 AND either we have a meaningful before/after snapshot OR
+  // we ran a remove command, where after will be empty by design).
+  // Previously, a beet command that ran cleanly but matched zero items
+  // returned success: true → status: "accepted" → audit lied. The
+  // before/after check below catches the phantom-success case.
+  const meaningfulApplies = applyResults.filter((r) => {
+    if (!r.success) return false;
+    if (r.args[0] === "remove") return true; // removes have no after-snapshot
+    // For modify: require at least an after-snapshot key count > 0,
+    // OR detectable change between before and after.
+    const after = r.after as Record<string, unknown> | undefined;
+    return after && Object.keys(after).length > 0;
+  });
+  const phantomSuccesses = applyResults.length - failures.length - meaningfulApplies.length;
+  const allReallyApplied =
+    failures.length === 0 && phantomSuccesses === 0 && applyResults.length > 0;
+
   db.update(beetsaiReview)
     .set({
-      status: failures.length === 0 ? "accepted" : "pending",
-      resolvedAt: failures.length === 0 ? new Date().toISOString() : null,
+      status: allReallyApplied ? "accepted" : "pending",
+      resolvedAt: allReallyApplied ? new Date().toISOString() : null,
     })
     .where(eq(beetsaiReview.id, id))
     .run();
 
+  // Richer payload so the future ApplyOutputBlock UI can show stdout +
+  // before/after diff inline. Today's UI ignores the extra fields.
   return NextResponse.json({
-    accepted: failures.length === 0,
-    appliedCount: applyResults.length - failures.length,
+    accepted: allReallyApplied,
+    appliedCount: meaningfulApplies.length,
     failedCount: failures.length,
+    phantomCount: phantomSuccesses,
     failures: failures.map((f) => f.error),
+    results: applyResults.map((r) => ({
+      targetAlbum: r.targetAlbum,
+      args: r.args,
+      success: r.success,
+      stdout: (r as unknown as { stdout?: string }).stdout,
+      stderr: (r as unknown as { stderr?: string }).stderr,
+      exitCode: (r as unknown as { exitCode?: number | null }).exitCode,
+      before: r.before,
+      after: r.after,
+      vynlRowsUpdated: (r as unknown as { vynlRowsUpdated?: number | null }).vynlRowsUpdated,
+      error: r.error,
+    })),
   });
 }

@@ -6,6 +6,12 @@ import { generatePlaylist, generateCoverArtPrompt, generateCoverArt } from "@/li
 import * as fs from "fs";
 import * as path from "path";
 
+// Generation can run for a while (LLM + image gen + image download).
+// Default Next 15 timeout is 30s which kills the response with
+// "Channel Error" mid-flight. Give it room to breathe.
+export const maxDuration = 300;
+export const runtime = "nodejs";
+
 export async function POST(request: NextRequest) {
   const { mood } = await request.json();
 
@@ -78,36 +84,45 @@ export async function POST(request: NextRequest) {
         .run();
     }
 
-    // Try to generate cover art
-    let coverPath: string | null = null;
-    try {
-      const trackTitles = availableTracks
-        .filter((t) => validTrackIds.includes(t.id))
-        .map((t) => t.title);
-
-      const artPrompt = await generateCoverArtPrompt(result.name, trackTitles, mood);
-      const artUrl = await generateCoverArt(artPrompt);
-
-      if (artUrl) {
+    // Kick off cover art generation in the background — don't make the
+    // user wait through another LLM call + Replicate inference + image
+    // download. The playlist row is fully usable without a cover; the
+    // image lands on the row in the DB once it finishes (next page
+    // refresh picks it up). Previous behavior chained everything in one
+    // request and hit the 30s "Channel Error" wall.
+    const trackTitlesForCover = availableTracks
+      .filter((t) => validTrackIds.includes(t.id))
+      .map((t) => t.title);
+    void (async () => {
+      try {
+        const artPrompt = await generateCoverArtPrompt(
+          result.name,
+          trackTitlesForCover,
+          mood
+        );
+        const artUrl = await generateCoverArt(artPrompt);
+        if (!artUrl) return;
         const response = await fetch(artUrl);
         const buffer = Buffer.from(await response.arrayBuffer());
         const coversDir = path.join(process.cwd(), "public", "covers");
         if (!fs.existsSync(coversDir)) fs.mkdirSync(coversDir, { recursive: true });
-
         const filename = `playlist-${playlist.id}.png`;
         fs.writeFileSync(path.join(coversDir, filename), buffer);
-        coverPath = `/covers/${filename}`;
-
         db.update(playlists)
-          .set({ coverPath })
+          .set({ coverPath: `/covers/${filename}` })
           .where(eq(playlists.id, playlist.id))
           .run();
+      } catch (err) {
+        console.error("Cover art background job failed (non-fatal):", err);
       }
-    } catch (err) {
-      console.error("Cover art generation failed (non-fatal):", err);
-    }
+    })();
 
-    return NextResponse.json({ ...playlist, coverPath, trackCount: validTrackIds.length });
+    return NextResponse.json({
+      ...playlist,
+      coverPath: null,
+      coverPending: true,
+      trackCount: validTrackIds.length,
+    });
   } catch (err) {
     return NextResponse.json(
       { error: "Failed to generate playlist", details: String(err) },

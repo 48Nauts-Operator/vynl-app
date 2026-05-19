@@ -52,6 +52,7 @@ import {
   Code,
   Eye,
   FolderSearch,
+  Disc3,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatFileSize } from "@/lib/utils";
@@ -733,7 +734,7 @@ export default function SettingsPage() {
     setTimeout(() => setSaved(false), 2000);
   };
 
-  const { features, toggleFeature } = useSettingsStore();
+  const { features, toggleFeature, ui, setUIPreference } = useSettingsStore();
 
   // Collapsible sections — Library Health open by default
   const [openSections, setOpenSections] = useState<Set<string>>(new Set(["health"]));
@@ -790,6 +791,23 @@ export default function SettingsPage() {
         <Switch
           checked={hydrated && features.developerMode}
           onCheckedChange={() => toggleFeature("developerMode")}
+        />
+      </div>
+
+      {/* 5-star celebration animation toggle */}
+      <div className="flex items-center justify-between py-2 px-1">
+        <div className="flex items-center gap-3">
+          <Disc3 className="h-4 w-4 text-[#a855f7]" />
+          <div>
+            <p className="text-sm font-medium">5-Vynl Celebration</p>
+            <p className="text-xs text-muted-foreground">
+              Show the spinning-vinyl overlay when you crown a track with 5 Vynls. Tracks still get added to All-Time Songs either way.
+            </p>
+          </div>
+        </div>
+        <Switch
+          checked={hydrated && (ui?.celebrateFiveStar ?? true)}
+          onCheckedChange={(v) => setUIPreference("celebrateFiveStar", v)}
         />
       </div>
 
