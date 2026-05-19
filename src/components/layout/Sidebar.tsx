@@ -14,6 +14,7 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Disc3,
   Mic2,
   Info,
@@ -34,29 +35,55 @@ import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { useSettingsStore, type FeatureFlags } from "@/store/settings";
 
-const navItems: Array<{
+interface NavItem {
   href: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   featureKey?: keyof FeatureFlags;
-}> = [
+}
+
+interface NavGroup {
+  group: string;            // section label
+  items: NavItem[];
+}
+
+type NavEntry = NavItem | NavGroup;
+
+function isGroup(e: NavEntry): e is NavGroup {
+  return (e as NavGroup).group !== undefined;
+}
+
+// Top-level flat items first, then collapsible sections at the bottom.
+const navEntries: NavEntry[] = [
   { href: "/", label: "Home", icon: Home },
-  { href: "/library", label: "Library", icon: Library },
   { href: "/albums", label: "Albums", icon: Disc3 },
   { href: "/artists", label: "Artists", icon: Mic2 },
-  { href: "/stats", label: "Stats", icon: BarChart3 },
   { href: "/discover", label: "Discover", icon: Compass, featureKey: "discover" },
   { href: "/playlists", label: "Playlists", icon: ListMusic, featureKey: "playlists" },
   { href: "/wishlist", label: "Wishlist", icon: Heart },
   { href: "/podcasts", label: "Podcasts", icon: Podcast, featureKey: "podcasts" },
   { href: "/youtube", label: "YouTube", icon: Youtube, featureKey: "youtube" },
-  { href: "/party", label: "AI DJ", icon: Headphones, featureKey: "partyMode" },
-  { href: "/karaoke", label: "Karaoke", icon: MicVocal, featureKey: "partyMode" },
   { href: "/profile", label: "Taste Profile", icon: User, featureKey: "tasteProfile" },
-  { href: "/speakers", label: "Speakers", icon: Speaker },
-  { href: "/settings", label: "Settings", icon: Settings },
-  { href: "/about", label: "About", icon: Info },
+  {
+    group: "Party",
+    items: [
+      { href: "/party", label: "AI DJ", icon: Headphones, featureKey: "partyMode" },
+      { href: "/karaoke", label: "Karaoke", icon: MicVocal, featureKey: "partyMode" },
+    ],
+  },
+  {
+    group: "Admin & Housekeeping",
+    items: [
+      { href: "/library", label: "Library", icon: Library },
+      { href: "/speakers", label: "Speakers", icon: Speaker },
+      { href: "/stats", label: "Stats", icon: BarChart3 },
+      { href: "/settings", label: "Settings", icon: Settings },
+      { href: "/about", label: "About", icon: Info },
+    ],
+  },
 ];
+
+const SECTION_STATE_KEY = "vynl:sidebar:sections";
 
 interface ImportJobStatus {
   status: "idle" | "running" | "complete" | "error";
@@ -106,9 +133,53 @@ export function Sidebar() {
       ? Math.round(((importJob.current || 0) / importJob.total) * 100)
       : 0;
 
-  const visibleNavItems = navItems.filter(
-    (item) => !item.featureKey || features[item.featureKey]
-  );
+  // Collapsible section state, persisted in localStorage so the
+  // sidebar layout survives page navigation. Default: both sections
+  // open on first load.
+  const [sectionsOpen, setSectionsOpen] = useState<Record<string, boolean>>({
+    Party: true,
+    "Admin & Housekeeping": true,
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(SECTION_STATE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          setSectionsOpen((prev) => ({ ...prev, ...parsed }));
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  const toggleSection = (key: string) => {
+    setSectionsOpen((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      try {
+        window.localStorage.setItem(SECTION_STATE_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
+  // Feature-flag filter applied uniformly to flat items and section
+  // contents; sections with zero visible items render no header.
+  const filterByFlags = (item: NavItem) =>
+    !item.featureKey || features[item.featureKey];
+
+  const visibleEntries: NavEntry[] = navEntries
+    .map((e) => {
+      if (isGroup(e)) {
+        const items = e.items.filter(filterByFlags);
+        return items.length > 0 ? { ...e, items } : null;
+      }
+      return filterByFlags(e) ? e : null;
+    })
+    .filter((e): e is NavEntry => e !== null);
 
   return (
     <div
@@ -136,13 +207,59 @@ export function Sidebar() {
 
       <ScrollArea className="flex-1 px-2 py-3">
         <nav className="flex flex-col gap-1">
-          {visibleNavItems.map((item) => {
-            const isActive =
-              pathname === item.href ||
-              (item.href !== "/" && pathname.startsWith(item.href));
+          {visibleEntries.map((entry, idx) => {
+            if (isGroup(entry)) {
+              const isOpen = sectionsOpen[entry.group] ?? true;
+              return (
+                <div key={`group-${entry.group}-${idx}`} className="mt-2">
+                  {!collapsed && (
+                    <button
+                      type="button"
+                      onClick={() => toggleSection(entry.group)}
+                      className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+                      aria-expanded={isOpen}
+                    >
+                      <span>{entry.group}</span>
+                      <ChevronDown
+                        className={cn(
+                          "h-3 w-3 transition-transform",
+                          isOpen ? "rotate-0" : "-rotate-90"
+                        )}
+                      />
+                    </button>
+                  )}
+                  {(collapsed || isOpen) && entry.items.map((item) => {
+                    const isActive =
+                      pathname === item.href ||
+                      (item.href !== "/" && pathname.startsWith(item.href));
+                    return (
+                      <Link key={item.href} href={item.href}>
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "w-full justify-start gap-3 h-10",
+                            collapsed && "justify-center px-2",
+                            isActive &&
+                              "bg-secondary text-primary hover:bg-secondary hover:text-primary"
+                          )}
+                        >
+                          <item.icon className="h-5 w-5 shrink-0" />
+                          {!collapsed && (
+                            <span className="truncate">{item.label}</span>
+                          )}
+                        </Button>
+                      </Link>
+                    );
+                  })}
+                </div>
+              );
+            }
 
+            const isActive =
+              pathname === entry.href ||
+              (entry.href !== "/" && pathname.startsWith(entry.href));
             return (
-              <Link key={item.href} href={item.href}>
+              <Link key={entry.href} href={entry.href}>
                 <Button
                   variant="ghost"
                   className={cn(
@@ -152,9 +269,9 @@ export function Sidebar() {
                       "bg-secondary text-primary hover:bg-secondary hover:text-primary"
                   )}
                 >
-                  <item.icon className="h-5 w-5 shrink-0" />
+                  <entry.icon className="h-5 w-5 shrink-0" />
                   {!collapsed && (
-                    <span className="truncate">{item.label}</span>
+                    <span className="truncate">{entry.label}</span>
                   )}
                 </Button>
               </Link>
