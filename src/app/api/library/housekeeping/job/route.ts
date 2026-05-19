@@ -20,9 +20,38 @@ interface HousekeepingJob {
   startedAt: number;
   completedAt?: number;
   result?: Record<string, unknown>;
+  /** Absolute path to the per-job log file under ./logs/. Tee target for
+   *  log() so users can review full output beyond the 500-line UI buffer. */
+  logFilePath?: string;
   /** Per-job options passed in via POST body. Currently only consumed by
    *  the beets-doctor action: planOnly = true skips all beet writes. */
   options?: { planOnly?: boolean };
+}
+
+// ── External log directory ──
+// Persisted at ./logs/ relative to cwd (i.e. /app/logs in container, repo
+// root in dev). Each job gets its own file; `current.log` symlinks to the
+// most recently started job so `tail -f logs/current.log` always works.
+const LOG_DIR = path.join(process.cwd(), "logs");
+
+function ensureLogDir() {
+  try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch { /* ignore */ }
+}
+
+function openJobLogFile(jobId: string, action: string): string | undefined {
+  try {
+    ensureLogDir();
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const filePath = path.join(LOG_DIR, `${ts}_${action}_${jobId}.log`);
+    fs.writeFileSync(filePath, `# Vynl housekeeping log\n# Job: ${jobId}\n# Action: ${action}\n# Started: ${new Date().toISOString()}\n\n`);
+    // Refresh current.log symlink so it always points at the latest job.
+    const current = path.join(LOG_DIR, "current.log");
+    try { fs.unlinkSync(current); } catch { /* may not exist */ }
+    try { fs.symlinkSync(path.basename(filePath), current); } catch { /* symlinks may be unsupported (Windows, some bind mounts) — ignore */ }
+    return filePath;
+  } catch {
+    return undefined;
+  }
 }
 
 // ── Persist state on globalThis so it survives Next.js dev-mode hot-reloads ──
@@ -39,9 +68,14 @@ function log(line: string) {
   const job = g.job;
   if (!job) return;
   const ts = new Date().toLocaleTimeString("en-GB", { hour12: false });
-  job.logs.push(`[${ts}] ${line}`);
+  const formatted = `[${ts}] ${line}`;
+  job.logs.push(formatted);
   if (job.logs.length > MAX_LOG_LINES) {
     job.logs = job.logs.slice(-MAX_LOG_LINES);
+  }
+  // Tee to disk. Append-only; failures must never break the runner.
+  if (job.logFilePath) {
+    try { fs.appendFileSync(job.logFilePath, formatted + "\n"); } catch { /* disk full / readonly — ignore */ }
   }
 }
 
@@ -1040,6 +1074,8 @@ export async function POST(request: NextRequest) {
 
   const jobId = `housekeeping-${Date.now()}`;
 
+  const logFilePath = openJobLogFile(jobId, action);
+
   g.job = {
     id: jobId,
     action,
@@ -1048,10 +1084,12 @@ export async function POST(request: NextRequest) {
     current: 0,
     logs: [],
     startedAt: Date.now(),
+    logFilePath,
     options: { planOnly: Boolean(planOnly) },
   };
 
   log(`Housekeeping started: ${action}`);
+  if (logFilePath) log(`Log file: ${path.relative(process.cwd(), logFilePath)}`);
   log("");
 
   // Fire and forget

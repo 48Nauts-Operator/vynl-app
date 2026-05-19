@@ -400,4 +400,9 @@ try { sqlite.prepare(`ALTER TABLE spotify_tracks ADD COLUMN popularity INTEGER`)
 // Add popularity column to wish_list
 try { sqlite.prepare(`ALTER TABLE wish_list ADD COLUMN popularity INTEGER`).run(); } catch { /* already exists */ }
 
+// PR 1 of compilation-filter work: column only, no population yet.
+// Existing rows default to 0 (not compilation). Refresh-metadata job
+// will start writing the real value in PR 2.
+try { sqlite.prepare(`ALTER TABLE tracks ADD COLUMN is_compilation INTEGER DEFAULT 0`).run(); } catch { /* already exists */ }
+
 export { schema };
