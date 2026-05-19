@@ -28,14 +28,18 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3101
 ENV HOSTNAME="0.0.0.0"
 
-# Install runtime dependencies: beets, ffmpeg, python3
+# Install runtime dependencies: beets, ffmpeg, python3, chromaprint.
+# libchromaprint-tools gives us the `fpcalc` binary for the
+# Shazam-style track identification feature (see /api/tracks/[id]/identify
+# audio mode). Adds ~5 MB to the image.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-venv \
     ffmpeg \
+    libchromaprint-tools \
     && python3 -m venv /opt/vynl-venv \
-    && /opt/vynl-venv/bin/pip install --no-cache-dir beets requests pylast pillow musicbrainzngs \
+    && /opt/vynl-venv/bin/pip install --no-cache-dir beets requests pylast pillow musicbrainzngs pyacoustid \
     && ln -s /opt/vynl-venv/bin/beet /usr/local/bin/beet \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

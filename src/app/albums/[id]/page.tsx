@@ -21,6 +21,7 @@ import { formatDuration } from "@/lib/utils";
 import { CoverSearchDialog } from "@/components/albums/CoverSearchDialog";
 import { AddToPlaylistDialog } from "@/components/playlists/AddToPlaylistDialog";
 import { VinylRating } from "@/components/ui/VinylRating";
+import { TrackActionsMenu } from "@/components/tracks/TrackActionsMenu";
 
 interface AlbumTrack {
   id: number;
@@ -492,9 +493,15 @@ export default function AlbumDetailPage() {
                       trackSubtitle={`${track.artist} — ${album.album}`}
                     />
                   </div>
-                  <span className={`text-sm text-right ${isActive ? "text-primary/70" : "text-muted-foreground"}`}>
-                    {formatDuration(track.duration)}
-                  </span>
+                  <div className="flex items-center gap-1 justify-end">
+                    <span className={`text-sm ${isActive ? "text-primary/70" : "text-muted-foreground"}`}>
+                      {formatDuration(track.duration)}
+                    </span>
+                    <TrackActionsMenu
+                      trackId={track.id}
+                      trackLabel={`${track.title} — ${track.artist}`}
+                    />
+                  </div>
                 </motion.div>
               </React.Fragment>
             );
