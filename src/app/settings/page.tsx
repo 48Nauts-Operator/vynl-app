@@ -1805,6 +1805,29 @@ export default function SettingsPage() {
           <Separator />
 
           <div className="space-y-2">
+            <Label className="flex items-center gap-2">
+              AcoustID API Key
+              <Badge variant="outline" className="text-xs">
+                Audio Identify
+              </Badge>
+            </Label>
+            <Input
+              type="password"
+              value={hydrated ? (ui?.acoustIdApiKey ?? "") : ""}
+              onChange={(e) => setUIPreference("acoustIdApiKey", e.target.value)}
+              placeholder="Free key from acoustid.org/api-key"
+            />
+            <p className="text-xs text-muted-foreground">
+              Required only for the &quot;Identify (audio)&quot; track menu action.
+              Free at <a href="https://acoustid.org/api-key" target="_blank" rel="noreferrer" className="underline">acoustid.org/api-key</a> — no card,
+              no signup wall, 3 req/sec rate limit. The &quot;Look up metadata&quot;
+              action (MusicBrainz name search) works without any key.
+            </p>
+          </div>
+
+          <Separator />
+
+          <div className="space-y-2">
             <Label>Spotify Client ID</Label>
             <Input
               value={spotifyId}

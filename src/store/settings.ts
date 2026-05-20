@@ -21,6 +21,10 @@ export interface UIPreferences {
   /** Optional display name. Used to personalise greetings on the
    *  Home page (e.g. "Welcome back, Andre"). Empty = generic greeting. */
   userName: string;
+  /** AcoustID application key for Shazam-style audio identification.
+   *  Free from https://acoustid.org/api-key. Sent in the body on
+   *  every identify request — no server-side storage. */
+  acoustIdApiKey: string;
 }
 
 interface SettingsState {
@@ -49,6 +53,7 @@ export const useSettingsStore = create<SettingsState>()(
       ui: {
         celebrateFiveStar: true,
         userName: "",
+        acoustIdApiKey: "",
       },
       toggleFeature: (key) =>
         set((state) => ({

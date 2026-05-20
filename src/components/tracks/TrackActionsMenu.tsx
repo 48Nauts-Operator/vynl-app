@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { MoreVertical, Search, Mic, Loader2, CheckCircle, XCircle } from "lucide-react";
+import { useSettingsStore } from "@/store/settings";
 
 interface TrackActionsMenuProps {
   trackId: number;
@@ -62,6 +63,9 @@ export function TrackActionsMenu({ trackId, trackLabel, onApplied }: TrackAction
   const [candidates, setCandidates] = useState<IdentifyMatch[]>([]);
   const [applyingIdx, setApplyingIdx] = useState<number | null>(null);
   const [appliedIdx, setAppliedIdx] = useState<number | null>(null);
+  // User-supplied AcoustID key (free from acoustid.org/api-key).
+  // Sent in the body on every audio-mode call. Name mode ignores it.
+  const acoustIdKey = useSettingsStore((s) => s.ui?.acoustIdApiKey ?? "");
 
   const runIdentify = async (m: "name" | "audio") => {
     setMode(m);
@@ -74,7 +78,7 @@ export function TrackActionsMenu({ trackId, trackLabel, onApplied }: TrackAction
       const res = await fetch(`/api/tracks/${trackId}/identify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: m }),
+        body: JSON.stringify({ mode: m, acoustIdKey: acoustIdKey || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
