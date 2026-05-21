@@ -98,8 +98,42 @@ export async function generatePlaylist(
   mood: string,
   count = 20
 ): Promise<{ name: string; description: string; trackIds: number[] }> {
+  // CRITICAL: Sample down to a manageable set before sending. Dumping
+  // 15k tracks into the prompt blows past every LLM's context window
+  // (1.2 MB of text for a typical library), causing reasoning models
+  // to truncate the input or return empty. We sample 500 tracks with
+  // a weighted strategy: prefer ones whose genre even loosely matches
+  // the mood keywords, then top up with a random shuffle for breadth.
+  const SAMPLE_SIZE = 500;
+  const moodLower = mood.toLowerCase();
+  const moodKeywords = moodLower.split(/\s+/).filter((w) => w.length >= 3);
+  const matchesMood = (t: { genre?: string }) => {
+    const g = (t.genre || "").toLowerCase();
+    return g && moodKeywords.some((k) => g.includes(k));
+  };
+
+  let candidates = availableTracks;
+  if (availableTracks.length > SAMPLE_SIZE) {
+    const matched = availableTracks.filter(matchesMood);
+    const rest = availableTracks.filter((t) => !matchesMood(t));
+    // Shuffle each pool then take a slice.
+    const shuffled = (arr: typeof availableTracks) => {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    };
+    const matchedPick = shuffled(matched).slice(0, Math.min(matched.length, SAMPLE_SIZE * 0.6));
+    const restPick = shuffled(rest).slice(0, SAMPLE_SIZE - matchedPick.length);
+    candidates = [...matchedPick, ...restPick];
+  }
+
   const replyText = await generateText({
-    maxTokens: 1500,
+    // Reasoning models (qwen3, gemma-thinking) need headroom for the
+    // think block + the answer JSON. Same fix as the Doctor consult.
+    maxTokens: 3000,
     messages: [
       {
         role: "user",
@@ -107,19 +141,28 @@ export async function generatePlaylist(
 
 Taste profile: ${profile}
 
-Available tracks (select from these by ID):
-${availableTracks.map((t) => `ID:${t.id} - "${t.title}" by ${t.artist}${t.genre ? ` [${t.genre}]` : ""}`).join("\n")}
+Available tracks (select from these by ID — list is a relevance-sampled subset of the user's library; you do NOT need to use all of them):
+${candidates.map((t) => `ID:${t.id} - "${t.title}" by ${t.artist}${t.genre ? ` [${t.genre}]` : ""}`).join("\n")}
 
-Select up to ${count} tracks and create a cohesive playlist. Respond in JSON:
+Select up to ${count} tracks and create a cohesive playlist. Respond in JSON only, no markdown:
 {"name": "Playlist Name", "description": "Brief description", "trackIds": [1, 2, 3]}`,
       },
     ],
   });
 
-  const text =
-    replyText;
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("Failed to parse playlist");
+  const text = replyText;
+  // Strip reasoning blocks the same way Doctor does — qwen3 / deepseek-r1
+  // / gemma-thinking emit <think>...</think> before the JSON.
+  const cleaned = text
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "")
+    .trim();
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new Error(
+      `LLM did not return parseable JSON. First 200 chars: ${text.slice(0, 200)}`
+    );
+  }
   return JSON.parse(jsonMatch[0]);
 }
 
