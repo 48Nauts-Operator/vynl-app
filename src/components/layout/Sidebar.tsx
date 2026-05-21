@@ -27,6 +27,7 @@ import {
   MicVocal,
   Headphones,
   Heart,
+  Package,
 } from "lucide-react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -82,6 +83,7 @@ const navEntries: NavEntry[] = [
       { href: "/library", label: "Library", icon: Library },
       { href: "/speakers", label: "Speakers", icon: Speaker },
       { href: "/stats", label: "Stats", icon: BarChart3 },
+      { href: "/releases", label: "Releases", icon: Package },
       { href: "/settings", label: "Settings", icon: Settings },
       { href: "/about", label: "About", icon: Info },
     ],

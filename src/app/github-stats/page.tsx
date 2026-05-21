@@ -124,7 +124,7 @@ function TrafficBars({
 
 export default async function GithubStatsPage() {
   const stats = await getAggregatedStats();
-  const { repo, releases, traffic, totals, hasPat, fetchedAt } = stats;
+  const { repo, releases, traffic, totals, hasPat, fetchedAt, dockerHub } = stats;
 
   return (
     <div className="max-w-5xl mx-auto py-8 space-y-6 px-4">
@@ -170,9 +170,17 @@ export default async function GithubStatsPage() {
         />
         <StatTile
           icon={<Download className="h-5 w-5" />}
-          label="Total Downloads"
-          value={totals.downloads.toLocaleString()}
-          sub={`${totals.assets} asset${totals.assets === 1 ? "" : "s"} across ${totals.releases} release${totals.releases === 1 ? "" : "s"}`}
+          label={dockerHub ? "Docker Hub Pulls" : "Releases"}
+          value={
+            dockerHub
+              ? dockerHub.pullCount.toLocaleString()
+              : totals.releases.toLocaleString()
+          }
+          sub={
+            dockerHub
+              ? `${dockerHub.imageName} · ${dockerHub.starCount.toLocaleString()} stars`
+              : "Set DOCKERHUB_IMAGE to surface adoption metric"
+          }
         />
         <StatTile
           icon={<Package className="h-5 w-5" />}
