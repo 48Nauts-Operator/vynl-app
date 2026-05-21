@@ -35,11 +35,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Lowercase the username — Docker Hub auth signs the header
+      # case-sensitively and capitalised usernames trip "malformed
+      # HTTP Authorization header". Cheap fix: normalise before
+      # passing into docker/login-action.
+      - name: Normalise Docker Hub username
+        if: ${{ env.DOCKERHUB_IMAGE != '' }}
+        run: |
+          lower=$(echo "${{ secrets.DOCKERHUB_USERNAME }}" | tr '[:upper:]' '[:lower:]')
+          echo "DOCKERHUB_USERNAME_LC=$lower" >> "$GITHUB_ENV"
+
       - name: Log in to Docker Hub
         if: ${{ env.DOCKERHUB_IMAGE != '' }}
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          username: ${{ env.DOCKERHUB_USERNAME_LC }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Extract metadata

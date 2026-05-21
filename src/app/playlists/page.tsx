@@ -239,20 +239,30 @@ export default function PlaylistsPage() {
     fetchPlaylists();
   };
 
+  const [generateError, setGenerateError] = useState<string | null>(null);
   const generatePlaylist = async () => {
     if (!generateMood) return;
     setGenerating(true);
+    setGenerateError(null);
     try {
-      await fetch("/api/playlists/generate", {
+      const res = await fetch("/api/playlists/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mood: generateMood }),
       });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        setGenerateError(`HTTP ${res.status} — ${body.slice(0, 300)}`);
+        return;
+      }
       setGenerateMood("");
       setGenerateDialogOpen(false);
       fetchPlaylists();
-    } catch {}
-    setGenerating(false);
+    } catch (err) {
+      setGenerateError(String(err).replace(/^Error:\s*/, ""));
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const handleRateTrack = async (trackId: number, rating: number) => {
@@ -373,6 +383,16 @@ export default function PlaylistsPage() {
                   )}
                   Generate Playlist
                 </Button>
+                {generateError && (
+                  <div className="rounded-md border border-red-500/40 bg-red-500/5 p-2 text-xs font-mono text-red-300 break-words">
+                    {generateError}
+                  </div>
+                )}
+                {generating && (
+                  <p className="text-xs text-muted-foreground">
+                    LLM is curating tracks. Up to 60s for local models, 5–15s for hosted. Cover art generates in the background after the playlist appears.
+                  </p>
+                )}
               </div>
             </DialogContent>
           </Dialog>
