@@ -75,18 +75,24 @@ export async function GET(request: NextRequest) {
       const clauses = activeTypes.map((t) => {
         switch (t) {
           case "albums":
-            // Real albums: not a compilation, no MB release type that
-            // would put it in another bucket, and >= 5 tracks (singles
-            // and EPs cap at 4 in the new classification).
-            return `(MAX(is_compilation) = 0 AND COALESCE(MAX(album_type), 'album') NOT IN ('single','ep','compilation','soundtrack') AND COUNT(*) >= 5)`;
+            // Default bucket: not a compilation, not explicitly classified
+            // as single/ep/comp/soundtrack. Track-count >= 2 so we don't
+            // surface obviously-broken single-file imports here either.
+            // Unclassified small entries stay here until "Classify Album
+            // Types" tags them — explicit > guessed.
+            return `(MAX(is_compilation) = 0
+                     AND COALESCE(MAX(album_type), 'album')
+                         NOT IN ('single','ep','compilation','soundtrack')
+                     AND COUNT(*) >= 2)`;
           case "compilations":
-            return `(MAX(is_compilation) = 1 OR MAX(album_type) = 'compilation' OR MAX(album_type) = 'soundtrack')`;
+            return `(MAX(is_compilation) = 1
+                     OR MAX(album_type) IN ('compilation','soundtrack'))`;
           case "singles":
-            // MB metadata wins when present. Otherwise fall back to a
-            // count heuristic: 1-4 tracks looks like single/EP territory.
-            // We deliberately group "ep" with singles here so the user's
-            // single-with-remixes case (4 versions of one track) shows up.
-            return `(MAX(album_type) IN ('single','ep') OR (MAX(album_type) IS NULL AND COUNT(*) <= 4 AND MAX(is_compilation) = 0))`;
+            // STRICT — requires explicit MB classification. The previous
+            // "track_count <= 4" fallback dragged broken single-track
+            // imports in here. Now: nothing shows as Single until either
+            // "Sync from Beets" or "Classify Album Types" has tagged it.
+            return `(MAX(album_type) IN ('single','ep'))`;
           default:
             return null;
         }
