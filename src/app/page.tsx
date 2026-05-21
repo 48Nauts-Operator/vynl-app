@@ -5,6 +5,16 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { usePlayerStore, Track } from "@/store/player";
+import { useSettingsStore } from "@/store/settings";
+
+/** Time-of-day greeting using local hours. Keeps it short. */
+function greetingPrefix(): string {
+  const h = new Date().getHours();
+  if (h < 5) return "Still up";
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
+}
 import {
   Music,
   Clock,
@@ -162,12 +172,16 @@ export default function HomePage() {
   }, []);
 
   const hasStats = stats && stats.topTracks.length >= 3;
+  const userName = useSettingsStore((s) => s.ui?.userName ?? "");
+  const heading = userName.trim()
+    ? `${greetingPrefix()}, ${userName.trim()}`
+    : "Welcome to Vynl";
 
   return (
     <div className="space-y-5">
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Welcome to Vynl</h1>
+          <h1 className="text-3xl font-bold">{heading}</h1>
           <p className="text-muted-foreground mt-1">
             Your AI-powered music companion
           </p>

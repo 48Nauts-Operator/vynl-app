@@ -21,6 +21,7 @@ import { formatDuration } from "@/lib/utils";
 import { CoverSearchDialog } from "@/components/albums/CoverSearchDialog";
 import { AddToPlaylistDialog } from "@/components/playlists/AddToPlaylistDialog";
 import { VinylRating } from "@/components/ui/VinylRating";
+import { TrackActionsMenu } from "@/components/tracks/TrackActionsMenu";
 
 interface AlbumTrack {
   id: number;
@@ -52,7 +53,7 @@ interface AlbumDetail {
   trackCount: number;
   totalDuration: number;
   isCompilation?: boolean;
-  albumType?: "compilation" | "single" | "album";
+  albumType?: "compilation" | "single" | "ep" | "soundtrack" | "album";
   tracks: AlbumTrack[];
 }
 
@@ -350,16 +351,23 @@ export default function AlbumDetailPage() {
           <p
             className={
               "text-sm uppercase tracking-wider " +
-              (album.albumType === "compilation"
+              (album.albumType === "compilation" ||
+              album.albumType === "single" ||
+              album.albumType === "ep" ||
+              album.albumType === "soundtrack"
                 ? "text-[#ec4899] font-semibold"
                 : "text-muted-foreground")
             }
           >
             {album.albumType === "compilation"
               ? "Compilation"
-              : album.albumType === "single"
-                ? "Single"
-                : "Album"}
+              : album.albumType === "soundtrack"
+                ? "Soundtrack"
+                : album.albumType === "single"
+                  ? "Single"
+                  : album.albumType === "ep"
+                    ? "EP"
+                    : "Album"}
           </p>
           <h1 className="text-4xl font-bold">{album.album}</h1>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -492,9 +500,15 @@ export default function AlbumDetailPage() {
                       trackSubtitle={`${track.artist} — ${album.album}`}
                     />
                   </div>
-                  <span className={`text-sm text-right ${isActive ? "text-primary/70" : "text-muted-foreground"}`}>
-                    {formatDuration(track.duration)}
-                  </span>
+                  <div className="flex items-center gap-1 justify-end">
+                    <span className={`text-sm ${isActive ? "text-primary/70" : "text-muted-foreground"}`}>
+                      {formatDuration(track.duration)}
+                    </span>
+                    <TrackActionsMenu
+                      trackId={track.id}
+                      trackLabel={`${track.title} — ${track.artist}`}
+                    />
+                  </div>
                 </motion.div>
               </React.Fragment>
             );

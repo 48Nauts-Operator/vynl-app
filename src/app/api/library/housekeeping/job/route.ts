@@ -350,53 +350,42 @@ async function runFetchArtwork() {
 
     if (coverSaved) continue;
 
-    // Step 2: Search iTunes API
+    // Step 2: Multi-provider cover search (CAA + Deezer + iTunes).
+    // iTunes throttles aggressively so we no longer depend on it
+    // exclusively. searchCoverArt() de-duplicates across providers
+    // and returns the best hit list ordered by source quality.
     try {
+      const { searchCoverArt } = await import("@/lib/cover-art");
       const query = `${album.album_artist} ${album.album}`;
-      const url = `https://itunes.apple.com/search?${new URLSearchParams({
-        term: query,
-        entity: "album",
-        limit: "3",
-      })}`;
-
-      const res = await fetch(url);
-      if (!res.ok) {
-        log(`  \u26a0 iTunes API returned ${res.status}`);
-        errors++;
-        continue;
-      }
-
-      const data = await res.json();
-      const results = data.results || [];
+      const results = await searchCoverArt(query);
 
       if (results.length > 0) {
-        // Use the first result's artwork
-        const artworkUrl = results[0].artworkUrl100?.replace("100x100", "600x600") || results[0].artworkUrl100;
+        const top = results[0];
+        const imgRes = await fetch(top.artworkUrl);
+        if (imgRes.ok) {
+          const buffer = Buffer.from(await imgRes.arrayBuffer());
+          const hash = crypto.createHash("md5").update(album.album + album.album_artist).digest("hex");
+          // CAA serves PNG sometimes, Deezer/iTunes JPG. .jpg ext is
+          // fine for /covers/ static serving \u2014 browser sniffs the
+          // bytes anyway.
+          const filename = `${hash}.jpg`;
+          fs.writeFileSync(path.join(coversDir, filename), buffer);
+          const coverPath = `/covers/${filename}`;
 
-        if (artworkUrl) {
-          const imgRes = await fetch(artworkUrl);
-          if (imgRes.ok) {
-            const buffer = Buffer.from(await imgRes.arrayBuffer());
-            const hash = crypto.createHash("md5").update(album.album + album.album_artist).digest("hex");
-            const filename = `${hash}.jpg`;
-            fs.writeFileSync(path.join(coversDir, filename), buffer);
-            const coverPath = `/covers/${filename}`;
-
-            for (const tid of trackIds) {
-              sqlite.prepare(`UPDATE tracks SET cover_path = ? WHERE id = ?`).run(coverPath, tid);
-            }
-            log(`  \u2713 Downloaded from iTunes`);
-            found++;
-            continue;
+          for (const tid of trackIds) {
+            sqlite.prepare(`UPDATE tracks SET cover_path = ? WHERE id = ?`).run(coverPath, tid);
           }
+          log(`  \u2713 Downloaded from ${top.source}`);
+          found++;
+          continue;
         }
       }
 
-      log(`  \u26a0 No cover found`);
+      log(`  \u26a0 No cover found across CAA / Deezer / iTunes`);
       notFound++;
 
-      // Rate limit: small delay between iTunes API calls
-      await new Promise((r) => setTimeout(r, 300));
+      // Small delay between rounds \u2014 MusicBrainz wants 1 req/sec.
+      await new Promise((r) => setTimeout(r, 1100));
     } catch (err) {
       log(`  \u2717 Error: ${String(err).split("\n")[0]}`);
       errors++;
@@ -593,7 +582,7 @@ async function runBeetsDoctor() {
   }
 
   // ── Pass 1: Unflagged compilation candidates ──
-  log("━━━ Pass 1/2: Unflagged compilations ━━━");
+  log("━━━ Pass 1/5: Unflagged compilations ━━━");
   const comps = findCompilationCandidates();
   log(`Found ${comps.length} candidate(s) to evaluate.`);
   log("");
@@ -721,7 +710,7 @@ async function runBeetsDoctor() {
 
   // ── Pass 2: Disc / volume splits ──
   log("");
-  log("━━━ Pass 2/2: Disc / volume splits ━━━");
+  log("━━━ Pass 2/5: Disc / volume splits ━━━");
   const splits = findDiscSplits();
   log(`Found ${splits.length} candidate group(s).`);
   log("");
@@ -852,7 +841,7 @@ async function runBeetsDoctor() {
 
   // ── Pass 3: Junk / orphan entries ──
   log("");
-  log("━━━ Pass 3/4: Junk / orphan entries ━━━");
+  log("━━━ Pass 3/5: Junk / orphan entries ━━━");
   const { findJunkEntries, findGenreIssues } = await import(
     "@/lib/beets-doctor/detect"
   );
@@ -991,7 +980,7 @@ async function runBeetsDoctor() {
 
   // ── Pass 4: Empty / wrong genres ──
   log("");
-  log("━━━ Pass 4/4: Empty / wrong genres ━━━");
+  log("━━━ Pass 4/5: Empty / wrong genres ━━━");
   const genres = findGenreIssues({ includeEmpty: true, limit: 300 });
   log(`Found ${genres.length} candidate album(s) with missing or suspect genres.`);
   log("");
@@ -1092,6 +1081,87 @@ async function runBeetsDoctor() {
     }
   }
 
+  // ── Pass 5: Duplicate / re-titled albums (the "Forrest Gump" case) ──
+  log("");
+  log("━━━ Pass 5/5: Duplicate / re-titled albums ━━━");
+  const { findDuplicateAlbums } = await import("@/lib/beets-doctor/detect");
+  const { buildDuplicateAlbumPrompt } = await import("@/lib/beets-doctor/prompts");
+  const dups = findDuplicateAlbums();
+  log(`Found ${dups.length} candidate group(s) with overlapping track lists.`);
+  log("");
+
+  for (let i = 0; i < dups.length; i++) {
+    if (job.status === "cancelled") return;
+    const d = dups[i];
+    scanned++;
+    const titles = d.variants.map((v) => `"${v.album}"`).join(", ");
+    log(
+      `→ [${i + 1}/${dups.length}] canonical="${d.canonicalKey}" — ${d.variants.length} variants (${(d.maxOverlap * 100).toFixed(0)}% overlap): ${titles}`
+    );
+
+    // No rule auto-apply here — duplicate resolution always needs
+    // human / LLM judgement (which variant is canonical, which to
+    // drop). Queue everything for review with rich context.
+    const verdict = await consultLLM(buildDuplicateAlbumPrompt(d));
+    if (!verdict) {
+      log(`  ⚠ LLM returned no valid JSON — queuing without proposal`);
+      localDb.insert(beetsaiReview).values({
+        scanId,
+        issueType: "duplicate-album",
+        albumName: d.variants[0].album,
+        albumArtist: d.variants[0].albumArtist,
+        context: JSON.stringify({
+          canonicalKey: d.canonicalKey,
+          variants: d.variants.map((v) => ({
+            album: v.album,
+            albumArtist: v.albumArtist,
+            trackCount: v.trackCount,
+            year: v.year,
+            discNumbers: v.discNumbers,
+          })),
+          maxOverlap: d.maxOverlap,
+          bestPair: d.bestPair,
+        }),
+        proposedCommand: "(LLM unavailable — review manually)",
+        proposedArgs: JSON.stringify([]),
+        confidence: 0,
+        llmModel: llm.model,
+        reasoning: "LLM call failed; needs manual review",
+        status: "pending",
+      }).run();
+      queued++;
+      errors++;
+      continue;
+    }
+
+    localDb.insert(beetsaiReview).values({
+      scanId,
+      issueType: "duplicate-album",
+      albumName: d.variants[0].album,
+      albumArtist: d.variants[0].albumArtist,
+      context: JSON.stringify({
+        canonicalKey: d.canonicalKey,
+        variants: d.variants.map((v) => ({
+          album: v.album,
+          albumArtist: v.albumArtist,
+          trackCount: v.trackCount,
+          year: v.year,
+          discNumbers: v.discNumbers,
+        })),
+        maxOverlap: d.maxOverlap,
+        bestPair: d.bestPair,
+      }),
+      proposedCommand: `beet ${(verdict.args || []).join(" ")}`,
+      proposedArgs: JSON.stringify(verdict.args || []),
+      confidence: verdict.confidence,
+      llmModel: llm.model,
+      reasoning: verdict.reasoning,
+      status: "pending",
+    }).run();
+    log(`  ⊕ queued for review (${(verdict.confidence * 100).toFixed(0)}% conf) — ${verdict.reasoning}`);
+    queued++;
+  }
+
   log("");
   log("━━━ COMPLETE ━━━");
   log(`Scanned ${scanned} candidates`);
@@ -1106,6 +1176,241 @@ async function runBeetsDoctor() {
 }
 
 // ── Main background runner ──
+
+/**
+ * Bulk-sync beets-only fields (album_type, comp) into Vynl's tracks
+ * table. Pulls every items row from beets DB, matches by file_path
+ * (after the BEETS_PATH_REMAP reverse), and UPDATEs Vynl tracks.
+ * Cheap: pure DB-to-DB, no file I/O, no network. Run after a beets
+ * import or whenever Vynl tracks looks stale on the metadata Vynl
+ * doesn't read from file tags (notably MusicBrainz release type).
+ */
+async function runSyncBeetsMetadata() {
+  const job = g.job;
+  if (!job) return;
+
+  const Database = (await import("better-sqlite3")).default;
+  const BEETS_DB = process.env.BEETS_DB_PATH || "/music/library.db";
+  const REMAP_FROM = "/music/";
+  const REMAP_TO = "/Volumes/Music/";
+
+  log(`Syncing beets metadata (album_type, comp) into Vynl tracks...`);
+  log(`Beets DB: ${BEETS_DB}`);
+  log("");
+
+  let beets;
+  try {
+    beets = new Database(BEETS_DB, { readonly: true });
+  } catch (err) {
+    log(`✗ Could not open beets DB: ${err}`);
+    job.result = { synced: 0, missed: 0, total: 0 };
+    return;
+  }
+
+  const beetsRows = beets
+    .prepare(`SELECT path, albumtype, comp FROM items`)
+    .all() as Array<{ path: Buffer | string; albumtype: string | null; comp: number | null }>;
+  beets.close();
+  log(`Beets has ${beetsRows.length} items to sync.`);
+
+  job.total = beetsRows.length;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sqlite = (db as any).session?.client || (db as any).$client;
+  if (!sqlite) {
+    log(`✗ Could not obtain Vynl sqlite client`);
+    job.result = { synced: 0, missed: 0, total: beetsRows.length };
+    return;
+  }
+  const upd = sqlite.prepare(
+    `UPDATE tracks SET album_type = ?, is_compilation = ? WHERE file_path = ?`
+  );
+
+  let synced = 0;
+  let missed = 0;
+
+  const tx = sqlite.transaction((rows: typeof beetsRows) => {
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const beetsPath: string =
+        r.path instanceof Buffer ? r.path.toString("utf-8") : (r.path as string);
+      const vynlPath = beetsPath.startsWith(REMAP_FROM)
+        ? REMAP_TO + beetsPath.slice(REMAP_FROM.length)
+        : beetsPath;
+      const result = upd.run(
+        r.albumtype || null,
+        r.comp ? 1 : 0,
+        vynlPath
+      );
+      if (result.changes > 0) synced++;
+      else missed++;
+      if ((i + 1) % 500 === 0) {
+        job.current = i + 1;
+        log(`  ... ${i + 1}/${rows.length}  synced=${synced}  missed=${missed}`);
+      }
+    }
+  });
+  tx(beetsRows);
+
+  job.current = beetsRows.length;
+  job.result = { synced, missed, total: beetsRows.length };
+  log("");
+  log(`━━━ COMPLETE ━━━`);
+  log(`Synced ${synced} of ${beetsRows.length} (${missed} not in Vynl — usually path mismatches or beets-only items).`);
+  log(`Refresh /albums to see the Singles filter pick up the new album_type values.`);
+}
+
+/**
+ * Walk every album that doesn't already have a confident release type
+ * (track_count <= 7, album_type IS NULL or 'album') and ask
+ * MusicBrainz what kind of release it is. Writes the answer back to
+ * tracks.album_type so the Albums-page Singles/Compilations filters
+ * classify correctly going forward.
+ *
+ * Rate-limited to 1 req/sec to respect MusicBrainz fair use. For a
+ * library of ~500 small-track albums this is ~8 minutes.
+ *
+ * Skip rules — albums NOT worth a lookup:
+ *   - track_count > 7        (definitely an album)
+ *   - album_type already set to a non-null non-'album' value
+ *   - album == 'Unknown Album' or empty
+ *   - is_compilation = 1     (already classified)
+ */
+async function runClassifyAlbumTypes() {
+  const job = g.job;
+  if (!job) return;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sqlite = (db as any).session?.client || (db as any).$client;
+  if (!sqlite) {
+    log("✗ Could not obtain Vynl sqlite client");
+    return;
+  }
+
+  // Group candidates: small-track-count albums without a confident type.
+  const candidates = sqlite
+    .prepare(
+      `SELECT album, COALESCE(album_artist, artist) as album_artist,
+              COUNT(*) as track_count
+       FROM tracks
+       WHERE source = 'local'
+         AND album IS NOT NULL AND album != '' AND album != 'Unknown Album'
+       GROUP BY album, COALESCE(album_artist, artist)
+       HAVING COUNT(*) <= 7
+         AND (MAX(album_type) IS NULL OR MAX(album_type) = 'album')
+         AND MAX(is_compilation) = 0
+       ORDER BY COUNT(*) ASC`
+    )
+    .all() as Array<{ album: string; album_artist: string; track_count: number }>;
+
+  log(`Classifying ${candidates.length} candidate album(s) against MusicBrainz...`);
+  log("Skipping anything with > 7 tracks or already-known release type.");
+  log("");
+  job.total = candidates.length;
+
+  const upd = sqlite.prepare(
+    `UPDATE tracks SET album_type = ? WHERE album = ? AND COALESCE(album_artist, artist) = ?`
+  );
+
+  let classified = 0;
+  let noMatch = 0;
+  let errored = 0;
+  const typeCounts: Record<string, number> = {};
+
+  const UA = "Vynl/0.6.x (album-type classifier)";
+
+  for (let i = 0; i < candidates.length; i++) {
+    if (job.status === "cancelled") break;
+    const c = candidates[i];
+    job.current = i + 1;
+
+    try {
+      // MusicBrainz release search by artist + title.
+      const query = `release:"${c.album.replace(/"/g, "")}" AND artist:"${c.album_artist.replace(/"/g, "")}"`;
+      const url = `https://musicbrainz.org/ws/2/release?query=${encodeURIComponent(query)}&fmt=json&limit=3`;
+      const res = await fetch(url, {
+        headers: { "User-Agent": UA, Accept: "application/json" },
+      });
+
+      if (!res.ok) {
+        log(`  ⚠ MB returned ${res.status} for "${c.album_artist} — ${c.album}"`);
+        errored++;
+        await new Promise((r) => setTimeout(r, 1100));
+        continue;
+      }
+
+      const data = await res.json();
+      type Release = {
+        id: string;
+        "primary-type"?: string;
+        "release-group"?: { "primary-type"?: string };
+        score?: number;
+      };
+      const releases = (data.releases || []) as Release[];
+
+      if (releases.length === 0) {
+        noMatch++;
+        if ((i + 1) % 25 === 0) {
+          log(`  ... ${i + 1}/${candidates.length}  classified=${classified} no-match=${noMatch} errors=${errored}`);
+        }
+        await new Promise((r) => setTimeout(r, 1100));
+        continue;
+      }
+
+      // Take the highest-scoring release's primary-type. release-group's
+      // primary-type is more reliable when the release one is missing.
+      const top = releases[0];
+      const rawType =
+        top["primary-type"] ||
+        top["release-group"]?.["primary-type"] ||
+        null;
+      if (!rawType) {
+        noMatch++;
+        await new Promise((r) => setTimeout(r, 1100));
+        continue;
+      }
+
+      const albumType = rawType.toLowerCase();
+      upd.run(albumType, c.album, c.album_artist);
+      classified++;
+      typeCounts[albumType] = (typeCounts[albumType] || 0) + 1;
+
+      if ((i + 1) % 25 === 0 || albumType === "single" || albumType === "ep") {
+        log(
+          `  ✓ [${i + 1}/${candidates.length}] "${c.album_artist} — ${c.album}" (${c.track_count} tracks) → ${albumType}`
+        );
+      }
+
+      // MB free-tier rate limit: 1 req/sec.
+      await new Promise((r) => setTimeout(r, 1100));
+    } catch (err) {
+      log(`  ✗ Error on "${c.album}": ${String(err).split("\n")[0]}`);
+      errored++;
+      await new Promise((r) => setTimeout(r, 1100));
+    }
+  }
+
+  log("");
+  log("━━━ COMPLETE ━━━");
+  log(
+    `Classified ${classified} of ${candidates.length}. No-match: ${noMatch}. Errors: ${errored}.`
+  );
+  if (Object.keys(typeCounts).length > 0) {
+    log("Distribution:");
+    for (const [type, count] of Object.entries(typeCounts).sort((a, b) => b[1] - a[1])) {
+      log(`  ${type}: ${count}`);
+    }
+  }
+  log("Refresh /albums to see Singles/EPs land in the correct bucket.");
+
+  job.result = {
+    classified,
+    noMatch,
+    errored,
+    total: candidates.length,
+    typeCounts,
+  };
+}
 
 async function runHousekeepingJob() {
   const job = g.job;
@@ -1128,6 +1433,12 @@ async function runHousekeepingJob() {
       case "beets-doctor":
         await runBeetsDoctor();
         break;
+      case "sync-beets-metadata":
+        await runSyncBeetsMetadata();
+        break;
+      case "classify-album-types":
+        await runClassifyAlbumTypes();
+        break;
     }
 
     if (job.status === "cancelled") {
@@ -1149,7 +1460,7 @@ async function runHousekeepingJob() {
 
 // ── HTTP handlers ──
 
-const VALID_ACTIONS = ["clean-missing", "refresh-metadata", "fetch-artwork", "refresh-genres", "beets-doctor"];
+const VALID_ACTIONS = ["clean-missing", "refresh-metadata", "fetch-artwork", "refresh-genres", "beets-doctor", "sync-beets-metadata", "classify-album-types"];
 
 export async function POST(request: NextRequest) {
   const job = g.job;

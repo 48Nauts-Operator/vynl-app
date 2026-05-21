@@ -28,6 +28,10 @@ export async function GET(request: NextRequest) {
         genre,
         COUNT(*) as track_count,
         MAX(is_compilation) as is_compilation,
+        -- MB release type per group: use the most-frequent non-null value.
+        -- MAX() works because string comparison is consistent and the
+        -- common types ("single","ep","album") sort distinctly enough.
+        MAX(album_type) as album_type,
         SUM(duration) as total_duration,
         MIN(id) as first_track_id,
         MAX(added_at) as latest_added
@@ -70,10 +74,27 @@ export async function GET(request: NextRequest) {
     if (activeTypes.length > 0) {
       const clauses = activeTypes.map((t) => {
         switch (t) {
-          case "albums":       return `(MAX(is_compilation) = 0 AND COUNT(*) >= 2)`;
-          case "compilations": return `(MAX(is_compilation) = 1)`;
-          case "singles":      return `(COUNT(*) = 1)`;
-          default:             return null;
+          case "albums":
+            // Default bucket: not a compilation, not explicitly classified
+            // as single/ep/comp/soundtrack. Track-count >= 2 so we don't
+            // surface obviously-broken single-file imports here either.
+            // Unclassified small entries stay here until "Classify Album
+            // Types" tags them — explicit > guessed.
+            return `(MAX(is_compilation) = 0
+                     AND COALESCE(MAX(album_type), 'album')
+                         NOT IN ('single','ep','compilation','soundtrack')
+                     AND COUNT(*) >= 2)`;
+          case "compilations":
+            return `(MAX(is_compilation) = 1
+                     OR MAX(album_type) IN ('compilation','soundtrack'))`;
+          case "singles":
+            // STRICT — requires explicit MB classification. The previous
+            // "track_count <= 4" fallback dragged broken single-track
+            // imports in here. Now: nothing shows as Single until either
+            // "Sync from Beets" or "Classify Album Types" has tagged it.
+            return `(MAX(album_type) IN ('single','ep'))`;
+          default:
+            return null;
         }
       }).filter(Boolean);
       if (clauses.length > 0) {

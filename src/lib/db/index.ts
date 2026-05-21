@@ -409,4 +409,9 @@ try { sqlite.prepare(`ALTER TABLE tracks ADD COLUMN is_compilation INTEGER DEFAU
 // "All Time" is the reserved pinned-top section.
 try { sqlite.prepare(`ALTER TABLE playlists ADD COLUMN section TEXT`).run(); } catch { /* already exists */ }
 
+// MusicBrainz album release type (single / ep / album / compilation / etc).
+// Used by the Albums-page Singles filter so commercial singles + EPs are
+// classified correctly regardless of how many tracks were imported.
+try { sqlite.prepare(`ALTER TABLE tracks ADD COLUMN album_type TEXT`).run(); } catch { /* already exists */ }
+
 export { schema };

@@ -16,6 +16,7 @@ import type {
   DiscSplitCandidate,
   JunkCandidate,
   GenreCandidate,
+  DuplicateAlbumCandidate,
 } from "./detect";
 
 const STRICT_JSON_RULES = `
@@ -155,6 +156,75 @@ Proposed args template (when fixing):
 Confidence 1.0 only when you're sure of both:
   (a) the current genre is wrong/missing, AND
   (b) you know the right one with high certainty.
+
+${STRICT_JSON_RULES}`;
+}
+
+export function buildDuplicateAlbumPrompt(c: DuplicateAlbumCandidate): string {
+  const variantList = c.variants
+    .map(
+      (v, i) =>
+        `  ${i}. "${v.album}" by ${v.albumArtist || "(unknown)"} — ${v.trackCount} tracks, disc(s)=${v.discNumbers.join(",") || "?"}${v.year ? ` (${v.year})` : ""}`
+    )
+    .join("\n");
+  const [a, b] = c.bestPair;
+  return `You are auditing what looks like duplicate / re-titled album imports.
+
+Canonical key (after stripping disc suffixes + subtitles): "${c.canonicalKey}"
+Highest pairwise track-title overlap: ${(c.maxOverlap * 100).toFixed(0)}%
+Best-overlap pair: variants ${a} and ${b}
+
+Variants:
+${variantList}
+
+Sample track titles per variant (first 8):
+${c.variants
+  .map(
+    (v, i) =>
+      `  ${i}. ${v.titleSet.slice(0, 8).map((t) => `"${t}"`).join(", ")}`
+  )
+  .join("\n")}
+
+Decide what to do. ONE of:
+
+1. command="modify" — rename one or more variants to a canonical name
+   (e.g. rename the bare "Forrest Gump" entries to
+   "Forrest Gump: The Soundtrack" because the soundtrack subtitle is
+   the proper title). args should target each rename:
+   ["modify", "-y", "album:<old>", "album=<canonical>"]
+   For multiple renames, the runner will iterate based on a list
+   you put in proposedRenames (see below).
+
+2. command="remove-duplicate" — when two variants are byte-equal
+   duplicates (very high overlap, same disc number), pick one to
+   remove from beets DB (file untouched). args should be the beets
+   query for the variant to remove, e.g.
+   ["remove", "-y", "album:<variant-to-drop>"]
+
+3. command="skip" — the variants are actually distinct releases that
+   happen to share songs (e.g. a "Best Of" album + the original album).
+
+Rules:
+- Soundtracks usually have the explicit subtitle on MusicBrainz —
+  prefer the version WITH the subtitle as canonical.
+- If two variants share > 95% of titles AND the same disc number,
+  treat as duplicates.
+- If two variants share moderate overlap but different disc numbers,
+  they're parts of the same multi-disc release — propose a rename
+  under one canonical name.
+- Confidence 1.0 only when the action is unambiguous.
+
+Reply with a JSON object of the shape:
+{
+  "shouldFix": boolean,
+  "confidence": 0..1,
+  "command": "modify" | "remove-duplicate" | "skip",
+  "args": [...],                 // primary command args
+  "proposedRenames": [           // optional, only for "modify" with multiple renames
+    { "from": "<current album>", "to": "<canonical album>" }
+  ],
+  "reasoning": "short one-sentence explanation"
+}
 
 ${STRICT_JSON_RULES}`;
 }
