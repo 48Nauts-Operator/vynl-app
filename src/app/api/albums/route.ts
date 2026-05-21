@@ -28,6 +28,10 @@ export async function GET(request: NextRequest) {
         genre,
         COUNT(*) as track_count,
         MAX(is_compilation) as is_compilation,
+        -- MB release type per group: use the most-frequent non-null value.
+        -- MAX() works because string comparison is consistent and the
+        -- common types ("single","ep","album") sort distinctly enough.
+        MAX(album_type) as album_type,
         SUM(duration) as total_duration,
         MIN(id) as first_track_id,
         MAX(added_at) as latest_added
@@ -70,10 +74,21 @@ export async function GET(request: NextRequest) {
     if (activeTypes.length > 0) {
       const clauses = activeTypes.map((t) => {
         switch (t) {
-          case "albums":       return `(MAX(is_compilation) = 0 AND COUNT(*) >= 2)`;
-          case "compilations": return `(MAX(is_compilation) = 1)`;
-          case "singles":      return `(COUNT(*) = 1)`;
-          default:             return null;
+          case "albums":
+            // Real albums: not a compilation, no MB release type that
+            // would put it in another bucket, and >= 5 tracks (singles
+            // and EPs cap at 4 in the new classification).
+            return `(MAX(is_compilation) = 0 AND COALESCE(MAX(album_type), 'album') NOT IN ('single','ep','compilation','soundtrack') AND COUNT(*) >= 5)`;
+          case "compilations":
+            return `(MAX(is_compilation) = 1 OR MAX(album_type) = 'compilation' OR MAX(album_type) = 'soundtrack')`;
+          case "singles":
+            // MB metadata wins when present. Otherwise fall back to a
+            // count heuristic: 1-4 tracks looks like single/EP territory.
+            // We deliberately group "ep" with singles here so the user's
+            // single-with-remixes case (4 versions of one track) shows up.
+            return `(MAX(album_type) IN ('single','ep') OR (MAX(album_type) IS NULL AND COUNT(*) <= 4 AND MAX(is_compilation) = 0))`;
+          default:
+            return null;
         }
       }).filter(Boolean);
       if (clauses.length > 0) {

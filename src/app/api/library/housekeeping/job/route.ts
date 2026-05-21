@@ -1177,6 +1177,89 @@ async function runBeetsDoctor() {
 
 // ── Main background runner ──
 
+/**
+ * Bulk-sync beets-only fields (album_type, comp) into Vynl's tracks
+ * table. Pulls every items row from beets DB, matches by file_path
+ * (after the BEETS_PATH_REMAP reverse), and UPDATEs Vynl tracks.
+ * Cheap: pure DB-to-DB, no file I/O, no network. Run after a beets
+ * import or whenever Vynl tracks looks stale on the metadata Vynl
+ * doesn't read from file tags (notably MusicBrainz release type).
+ */
+async function runSyncBeetsMetadata() {
+  const job = g.job;
+  if (!job) return;
+
+  const Database = (await import("better-sqlite3")).default;
+  const BEETS_DB = process.env.BEETS_DB_PATH || "/music/library.db";
+  const REMAP_FROM = "/music/";
+  const REMAP_TO = "/Volumes/Music/";
+
+  log(`Syncing beets metadata (album_type, comp) into Vynl tracks...`);
+  log(`Beets DB: ${BEETS_DB}`);
+  log("");
+
+  let beets;
+  try {
+    beets = new Database(BEETS_DB, { readonly: true });
+  } catch (err) {
+    log(`✗ Could not open beets DB: ${err}`);
+    job.result = { synced: 0, missed: 0, total: 0 };
+    return;
+  }
+
+  const beetsRows = beets
+    .prepare(`SELECT path, albumtype, comp FROM items`)
+    .all() as Array<{ path: Buffer | string; albumtype: string | null; comp: number | null }>;
+  beets.close();
+  log(`Beets has ${beetsRows.length} items to sync.`);
+
+  job.total = beetsRows.length;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sqlite = (db as any).session?.client || (db as any).$client;
+  if (!sqlite) {
+    log(`✗ Could not obtain Vynl sqlite client`);
+    job.result = { synced: 0, missed: 0, total: beetsRows.length };
+    return;
+  }
+  const upd = sqlite.prepare(
+    `UPDATE tracks SET album_type = ?, is_compilation = ? WHERE file_path = ?`
+  );
+
+  let synced = 0;
+  let missed = 0;
+
+  const tx = sqlite.transaction((rows: typeof beetsRows) => {
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const beetsPath: string =
+        r.path instanceof Buffer ? r.path.toString("utf-8") : (r.path as string);
+      const vynlPath = beetsPath.startsWith(REMAP_FROM)
+        ? REMAP_TO + beetsPath.slice(REMAP_FROM.length)
+        : beetsPath;
+      const result = upd.run(
+        r.albumtype || null,
+        r.comp ? 1 : 0,
+        vynlPath
+      );
+      if (result.changes > 0) synced++;
+      else missed++;
+      if ((i + 1) % 500 === 0) {
+        job.current = i + 1;
+        log(`  ... ${i + 1}/${rows.length}  synced=${synced}  missed=${missed}`);
+      }
+    }
+  });
+  tx(beetsRows);
+
+  job.current = beetsRows.length;
+  job.result = { synced, missed, total: beetsRows.length };
+  log("");
+  log(`━━━ COMPLETE ━━━`);
+  log(`Synced ${synced} of ${beetsRows.length} (${missed} not in Vynl — usually path mismatches or beets-only items).`);
+  log(`Refresh /albums to see the Singles filter pick up the new album_type values.`);
+}
+
 async function runHousekeepingJob() {
   const job = g.job;
   if (!job) return;
@@ -1197,6 +1280,9 @@ async function runHousekeepingJob() {
         break;
       case "beets-doctor":
         await runBeetsDoctor();
+        break;
+      case "sync-beets-metadata":
+        await runSyncBeetsMetadata();
         break;
     }
 
@@ -1219,7 +1305,7 @@ async function runHousekeepingJob() {
 
 // ── HTTP handlers ──
 
-const VALID_ACTIONS = ["clean-missing", "refresh-metadata", "fetch-artwork", "refresh-genres", "beets-doctor"];
+const VALID_ACTIONS = ["clean-missing", "refresh-metadata", "fetch-artwork", "refresh-genres", "beets-doctor", "sync-beets-metadata"];
 
 export async function POST(request: NextRequest) {
   const job = g.job;

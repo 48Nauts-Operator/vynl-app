@@ -28,6 +28,12 @@ export const tracks = sqliteTable("tracks", {
   // Populated from the iTunes TCMP tag by the metadata-refresh job.
   // Drives the Albums-page filter (Albums / Compilations / Singles).
   isCompilation: integer("is_compilation", { mode: "boolean" }).default(false),
+  // MusicBrainz release-type ("album" / "single" / "ep" / "compilation" /
+  // "soundtrack" / "live" / "remix" / etc.). Populated from beets'
+  // items.albumtype when available, by the metadata-refresh job. Drives
+  // the Singles filter on the Albums page (single + EP if track_count
+  // <= 4, fallback to count heuristic when missing).
+  albumType: text("album_type"),
 });
 
 export const playlists = sqliteTable("playlists", {
