@@ -125,22 +125,9 @@ jobs:
             echo "Updated release ${TAG} (id=${RELEASE_ID})"
           fi
 
-          # Attach downloadable assets. Skipped if same-name asset already
-          # exists (GitHub disallows duplicate asset names per release).
-          EXISTING=$(echo "$REL" | jq -r '.assets[]?.name // empty')
-          for asset in docker-compose.yml portainer-stack.yml; do
-            if echo "$EXISTING" | grep -qx "$asset"; then
-              echo "Asset ${asset} already attached — skipping"
-              continue
-            fi
-            if [ ! -f "$asset" ]; then
-              echo "::warning::${asset} not found in repo — skipping"
-              continue
-            fi
-            echo "Uploading ${asset}..."
-            curl -fsS -X POST "${AUTH[@]}" \
-              -H "Content-Type: application/x-yaml" \
-              --data-binary @"$asset" \
-              "${UPLOADS}/releases/${RELEASE_ID}/assets?name=${asset}" \
-              | jq -r '"  ✓ \(.name) (\(.size) bytes)"'
-          done
+          # Note: YAML asset uploads (docker-compose.yml, portainer-stack.yml)
+          # removed because they showed "0 downloads" forever — nobody
+          # downloads those, they pull the image from GHCR instead. The
+          # files still live at HEAD in the repo for anyone who needs
+          # them. Adoption metric (Docker Hub pull_count) is handled by
+          # the publish-dockerhub job below + the /github-stats panel.

@@ -98,6 +98,41 @@ export function getTrafficClones(): Promise<TrafficSeries | null> {
   return ghFetch<TrafficSeries>("/traffic/clones", true);
 }
 
+/**
+ * Docker Hub pull count for the optional mirrored image. GHCR doesn't
+ * expose pulls publicly; Docker Hub does, so when we mirror the image
+ * there we get a real adoption number. Set DOCKERHUB_IMAGE env var
+ * to e.g. "48nauts/vynl-app" to enable. Returns null when unset or
+ * the API call fails.
+ */
+export interface DockerHubStats {
+  imageName: string;
+  pullCount: number;
+  starCount: number;
+  lastUpdated: string | null;
+}
+
+export async function getDockerHubStats(): Promise<DockerHubStats | null> {
+  const image = process.env.DOCKERHUB_IMAGE;
+  if (!image) return null;
+  try {
+    const res = await fetch(
+      `https://hub.docker.com/v2/repositories/${image}/`,
+      { next: { revalidate: REVALIDATE_SECONDS } }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return {
+      imageName: image,
+      pullCount: data.pull_count ?? 0,
+      starCount: data.star_count ?? 0,
+      lastUpdated: data.last_updated ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // Aggregate helpers consumed by the /api/github-stats route.
 export interface AggregatedStats {
   repo: RepoInfo | null;
@@ -106,40 +141,30 @@ export interface AggregatedStats {
     views: TrafficSeries | null;
     clones: TrafficSeries | null;
   };
+  dockerHub: DockerHubStats | null;
   totals: {
-    downloads: number;
     releases: number;
-    assets: number;
   };
   hasPat: boolean;
   fetchedAt: string;
 }
 
 export async function getAggregatedStats(): Promise<AggregatedStats> {
-  const [repo, releases, views, clones] = await Promise.all([
+  const [repo, releases, views, clones, dockerHub] = await Promise.all([
     getRepoInfo(),
     getReleases(),
     getTrafficViews(),
     getTrafficClones(),
+    getDockerHubStats(),
   ]);
-
-  let downloads = 0;
-  let assets = 0;
-  for (const r of releases) {
-    for (const a of r.assets) {
-      downloads += a.download_count;
-      assets += 1;
-    }
-  }
 
   return {
     repo,
     releases,
     traffic: { views, clones },
+    dockerHub,
     totals: {
-      downloads,
       releases: releases.length,
-      assets,
     },
     hasPat: hasPat(),
     fetchedAt: new Date().toISOString(),
