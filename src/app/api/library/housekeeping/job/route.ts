@@ -582,7 +582,7 @@ async function runBeetsDoctor() {
   }
 
   // ── Pass 1: Unflagged compilation candidates ──
-  log("━━━ Pass 1/2: Unflagged compilations ━━━");
+  log("━━━ Pass 1/5: Unflagged compilations ━━━");
   const comps = findCompilationCandidates();
   log(`Found ${comps.length} candidate(s) to evaluate.`);
   log("");
@@ -710,7 +710,7 @@ async function runBeetsDoctor() {
 
   // ── Pass 2: Disc / volume splits ──
   log("");
-  log("━━━ Pass 2/2: Disc / volume splits ━━━");
+  log("━━━ Pass 2/5: Disc / volume splits ━━━");
   const splits = findDiscSplits();
   log(`Found ${splits.length} candidate group(s).`);
   log("");
@@ -841,7 +841,7 @@ async function runBeetsDoctor() {
 
   // ── Pass 3: Junk / orphan entries ──
   log("");
-  log("━━━ Pass 3/4: Junk / orphan entries ━━━");
+  log("━━━ Pass 3/5: Junk / orphan entries ━━━");
   const { findJunkEntries, findGenreIssues } = await import(
     "@/lib/beets-doctor/detect"
   );
@@ -980,7 +980,7 @@ async function runBeetsDoctor() {
 
   // ── Pass 4: Empty / wrong genres ──
   log("");
-  log("━━━ Pass 4/4: Empty / wrong genres ━━━");
+  log("━━━ Pass 4/5: Empty / wrong genres ━━━");
   const genres = findGenreIssues({ includeEmpty: true, limit: 300 });
   log(`Found ${genres.length} candidate album(s) with missing or suspect genres.`);
   log("");
@@ -1079,6 +1079,87 @@ async function runBeetsDoctor() {
       log(`  ⊕ queued (${(verdict.confidence * 100).toFixed(0)}% conf) — ${verdict.reasoning}`);
       queued++;
     }
+  }
+
+  // ── Pass 5: Duplicate / re-titled albums (the "Forrest Gump" case) ──
+  log("");
+  log("━━━ Pass 5/5: Duplicate / re-titled albums ━━━");
+  const { findDuplicateAlbums } = await import("@/lib/beets-doctor/detect");
+  const { buildDuplicateAlbumPrompt } = await import("@/lib/beets-doctor/prompts");
+  const dups = findDuplicateAlbums();
+  log(`Found ${dups.length} candidate group(s) with overlapping track lists.`);
+  log("");
+
+  for (let i = 0; i < dups.length; i++) {
+    if (job.status === "cancelled") return;
+    const d = dups[i];
+    scanned++;
+    const titles = d.variants.map((v) => `"${v.album}"`).join(", ");
+    log(
+      `→ [${i + 1}/${dups.length}] canonical="${d.canonicalKey}" — ${d.variants.length} variants (${(d.maxOverlap * 100).toFixed(0)}% overlap): ${titles}`
+    );
+
+    // No rule auto-apply here — duplicate resolution always needs
+    // human / LLM judgement (which variant is canonical, which to
+    // drop). Queue everything for review with rich context.
+    const verdict = await consultLLM(buildDuplicateAlbumPrompt(d));
+    if (!verdict) {
+      log(`  ⚠ LLM returned no valid JSON — queuing without proposal`);
+      localDb.insert(beetsaiReview).values({
+        scanId,
+        issueType: "duplicate-album",
+        albumName: d.variants[0].album,
+        albumArtist: d.variants[0].albumArtist,
+        context: JSON.stringify({
+          canonicalKey: d.canonicalKey,
+          variants: d.variants.map((v) => ({
+            album: v.album,
+            albumArtist: v.albumArtist,
+            trackCount: v.trackCount,
+            year: v.year,
+            discNumbers: v.discNumbers,
+          })),
+          maxOverlap: d.maxOverlap,
+          bestPair: d.bestPair,
+        }),
+        proposedCommand: "(LLM unavailable — review manually)",
+        proposedArgs: JSON.stringify([]),
+        confidence: 0,
+        llmModel: llm.model,
+        reasoning: "LLM call failed; needs manual review",
+        status: "pending",
+      }).run();
+      queued++;
+      errors++;
+      continue;
+    }
+
+    localDb.insert(beetsaiReview).values({
+      scanId,
+      issueType: "duplicate-album",
+      albumName: d.variants[0].album,
+      albumArtist: d.variants[0].albumArtist,
+      context: JSON.stringify({
+        canonicalKey: d.canonicalKey,
+        variants: d.variants.map((v) => ({
+          album: v.album,
+          albumArtist: v.albumArtist,
+          trackCount: v.trackCount,
+          year: v.year,
+          discNumbers: v.discNumbers,
+        })),
+        maxOverlap: d.maxOverlap,
+        bestPair: d.bestPair,
+      }),
+      proposedCommand: `beet ${(verdict.args || []).join(" ")}`,
+      proposedArgs: JSON.stringify(verdict.args || []),
+      confidence: verdict.confidence,
+      llmModel: llm.model,
+      reasoning: verdict.reasoning,
+      status: "pending",
+    }).run();
+    log(`  ⊕ queued for review (${(verdict.confidence * 100).toFixed(0)}% conf) — ${verdict.reasoning}`);
+    queued++;
   }
 
   log("");
