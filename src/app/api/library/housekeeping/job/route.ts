@@ -1260,6 +1260,158 @@ async function runSyncBeetsMetadata() {
   log(`Refresh /albums to see the Singles filter pick up the new album_type values.`);
 }
 
+/**
+ * Walk every album that doesn't already have a confident release type
+ * (track_count <= 7, album_type IS NULL or 'album') and ask
+ * MusicBrainz what kind of release it is. Writes the answer back to
+ * tracks.album_type so the Albums-page Singles/Compilations filters
+ * classify correctly going forward.
+ *
+ * Rate-limited to 1 req/sec to respect MusicBrainz fair use. For a
+ * library of ~500 small-track albums this is ~8 minutes.
+ *
+ * Skip rules — albums NOT worth a lookup:
+ *   - track_count > 7        (definitely an album)
+ *   - album_type already set to a non-null non-'album' value
+ *   - album == 'Unknown Album' or empty
+ *   - is_compilation = 1     (already classified)
+ */
+async function runClassifyAlbumTypes() {
+  const job = g.job;
+  if (!job) return;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sqlite = (db as any).session?.client || (db as any).$client;
+  if (!sqlite) {
+    log("✗ Could not obtain Vynl sqlite client");
+    return;
+  }
+
+  // Group candidates: small-track-count albums without a confident type.
+  const candidates = sqlite
+    .prepare(
+      `SELECT album, COALESCE(album_artist, artist) as album_artist,
+              COUNT(*) as track_count
+       FROM tracks
+       WHERE source = 'local'
+         AND album IS NOT NULL AND album != '' AND album != 'Unknown Album'
+       GROUP BY album, COALESCE(album_artist, artist)
+       HAVING COUNT(*) <= 7
+         AND (MAX(album_type) IS NULL OR MAX(album_type) = 'album')
+         AND MAX(is_compilation) = 0
+       ORDER BY COUNT(*) ASC`
+    )
+    .all() as Array<{ album: string; album_artist: string; track_count: number }>;
+
+  log(`Classifying ${candidates.length} candidate album(s) against MusicBrainz...`);
+  log("Skipping anything with > 7 tracks or already-known release type.");
+  log("");
+  job.total = candidates.length;
+
+  const upd = sqlite.prepare(
+    `UPDATE tracks SET album_type = ? WHERE album = ? AND COALESCE(album_artist, artist) = ?`
+  );
+
+  let classified = 0;
+  let noMatch = 0;
+  let errored = 0;
+  const typeCounts: Record<string, number> = {};
+
+  const UA = "Vynl/0.6.x (album-type classifier)";
+
+  for (let i = 0; i < candidates.length; i++) {
+    if (job.status === "cancelled") break;
+    const c = candidates[i];
+    job.current = i + 1;
+
+    try {
+      // MusicBrainz release search by artist + title.
+      const query = `release:"${c.album.replace(/"/g, "")}" AND artist:"${c.album_artist.replace(/"/g, "")}"`;
+      const url = `https://musicbrainz.org/ws/2/release?query=${encodeURIComponent(query)}&fmt=json&limit=3`;
+      const res = await fetch(url, {
+        headers: { "User-Agent": UA, Accept: "application/json" },
+      });
+
+      if (!res.ok) {
+        log(`  ⚠ MB returned ${res.status} for "${c.album_artist} — ${c.album}"`);
+        errored++;
+        await new Promise((r) => setTimeout(r, 1100));
+        continue;
+      }
+
+      const data = await res.json();
+      type Release = {
+        id: string;
+        "primary-type"?: string;
+        "release-group"?: { "primary-type"?: string };
+        score?: number;
+      };
+      const releases = (data.releases || []) as Release[];
+
+      if (releases.length === 0) {
+        noMatch++;
+        if ((i + 1) % 25 === 0) {
+          log(`  ... ${i + 1}/${candidates.length}  classified=${classified} no-match=${noMatch} errors=${errored}`);
+        }
+        await new Promise((r) => setTimeout(r, 1100));
+        continue;
+      }
+
+      // Take the highest-scoring release's primary-type. release-group's
+      // primary-type is more reliable when the release one is missing.
+      const top = releases[0];
+      const rawType =
+        top["primary-type"] ||
+        top["release-group"]?.["primary-type"] ||
+        null;
+      if (!rawType) {
+        noMatch++;
+        await new Promise((r) => setTimeout(r, 1100));
+        continue;
+      }
+
+      const albumType = rawType.toLowerCase();
+      upd.run(albumType, c.album, c.album_artist);
+      classified++;
+      typeCounts[albumType] = (typeCounts[albumType] || 0) + 1;
+
+      if ((i + 1) % 25 === 0 || albumType === "single" || albumType === "ep") {
+        log(
+          `  ✓ [${i + 1}/${candidates.length}] "${c.album_artist} — ${c.album}" (${c.track_count} tracks) → ${albumType}`
+        );
+      }
+
+      // MB free-tier rate limit: 1 req/sec.
+      await new Promise((r) => setTimeout(r, 1100));
+    } catch (err) {
+      log(`  ✗ Error on "${c.album}": ${String(err).split("\n")[0]}`);
+      errored++;
+      await new Promise((r) => setTimeout(r, 1100));
+    }
+  }
+
+  log("");
+  log("━━━ COMPLETE ━━━");
+  log(
+    `Classified ${classified} of ${candidates.length}. No-match: ${noMatch}. Errors: ${errored}.`
+  );
+  if (Object.keys(typeCounts).length > 0) {
+    log("Distribution:");
+    for (const [type, count] of Object.entries(typeCounts).sort((a, b) => b[1] - a[1])) {
+      log(`  ${type}: ${count}`);
+    }
+  }
+  log("Refresh /albums to see Singles/EPs land in the correct bucket.");
+
+  job.result = {
+    classified,
+    noMatch,
+    errored,
+    total: candidates.length,
+    typeCounts,
+  };
+}
+
 async function runHousekeepingJob() {
   const job = g.job;
   if (!job) return;
@@ -1284,6 +1436,9 @@ async function runHousekeepingJob() {
       case "sync-beets-metadata":
         await runSyncBeetsMetadata();
         break;
+      case "classify-album-types":
+        await runClassifyAlbumTypes();
+        break;
     }
 
     if (job.status === "cancelled") {
@@ -1305,7 +1460,7 @@ async function runHousekeepingJob() {
 
 // ── HTTP handlers ──
 
-const VALID_ACTIONS = ["clean-missing", "refresh-metadata", "fetch-artwork", "refresh-genres", "beets-doctor", "sync-beets-metadata"];
+const VALID_ACTIONS = ["clean-missing", "refresh-metadata", "fetch-artwork", "refresh-genres", "beets-doctor", "sync-beets-metadata", "classify-album-types"];
 
 export async function POST(request: NextRequest) {
   const job = g.job;

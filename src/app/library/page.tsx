@@ -36,6 +36,8 @@ import {
   ArrowUpDown,
   Tag,
   Stethoscope,
+  Database,
+  Layers,
 } from "lucide-react";
 import Image from "next/image";
 import { motion } from "framer-motion";
@@ -808,7 +810,7 @@ const HOUSEKEEPING_ACTIONS = [
   {
     id: "fetch-artwork",
     label: "Fetch Artwork",
-    desc: "Search iTunes and extract embedded art for albums missing covers.",
+    desc: "Search MusicBrainz Cover Art Archive, Deezer, and iTunes (in that order) and extract embedded art for albums missing covers. No more iTunes-429 dead-ends.",
     icon: ImageIcon,
   },
   {
@@ -816,6 +818,18 @@ const HOUSEKEEPING_ACTIONS = [
     label: "Re-fetch Genres",
     desc: "Run beets `lastgenre` to pull canonical genres from Last.fm for every album. Overwrites existing genres. ~1 album/sec; run a library scan afterwards.",
     icon: Tag,
+  },
+  {
+    id: "sync-beets-metadata",
+    label: "Sync from Beets",
+    desc: "Pull beets' MusicBrainz release-type (single / ep / album / compilation) and compilation flag into Vynl. Needed for the Singles + Compilations filters on the Albums page to classify correctly. Pure DB-to-DB, no file I/O, takes seconds.",
+    icon: Database,
+  },
+  {
+    id: "classify-album-types",
+    label: "Classify Album Types",
+    desc: "For every album that doesn't already have a release type, look it up on MusicBrainz (artist + name + track count) and write back single / ep / album. Catches singles + EPs the bare track-count heuristic missed (e.g. single-with-remixes releases). ~1 req/sec — takes a few minutes for a large library, runs in background.",
+    icon: Layers,
   },
 ];
 
