@@ -53,7 +53,7 @@ interface AlbumDetail {
   trackCount: number;
   totalDuration: number;
   isCompilation?: boolean;
-  albumType?: "compilation" | "single" | "album";
+  albumType?: "compilation" | "single" | "ep" | "soundtrack" | "album";
   tracks: AlbumTrack[];
 }
 
@@ -351,16 +351,23 @@ export default function AlbumDetailPage() {
           <p
             className={
               "text-sm uppercase tracking-wider " +
-              (album.albumType === "compilation"
+              (album.albumType === "compilation" ||
+              album.albumType === "single" ||
+              album.albumType === "ep" ||
+              album.albumType === "soundtrack"
                 ? "text-[#ec4899] font-semibold"
                 : "text-muted-foreground")
             }
           >
             {album.albumType === "compilation"
               ? "Compilation"
-              : album.albumType === "single"
-                ? "Single"
-                : "Album"}
+              : album.albumType === "soundtrack"
+                ? "Soundtrack"
+                : album.albumType === "single"
+                  ? "Single"
+                  : album.albumType === "ep"
+                    ? "EP"
+                    : "Album"}
           </p>
           <h1 className="text-4xl font-bold">{album.album}</h1>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">

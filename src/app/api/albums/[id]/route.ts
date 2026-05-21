@@ -39,16 +39,31 @@ export async function GET(
 
     const first = albumTracks[0];
     // Derive the album type for the detail header. Mirrors the
-    // Albums-page filter logic: compilations = any track flagged,
-    // singles = exactly one track, everything else is a regular album.
+    // Albums-page filter logic exactly so the badge agrees with the
+    // bucket the user clicked through from.
+    //
+    // Source-of-truth precedence:
+    //   1. explicit MB album_type column on the track (single/ep/
+    //      compilation/soundtrack/album) — set by Sync from Beets or
+    //      Classify Album Types
+    //   2. is_compilation flag (TCMP tag / Doctor fix)
+    //   3. fallback: anything else is treated as "album"
     const anyCompilation = albumTracks.some(
       (t: any) => t.is_compilation === 1
     );
-    const albumType: "compilation" | "single" | "album" = anyCompilation
-      ? "compilation"
-      : albumTracks.length === 1
-        ? "single"
-        : "album";
+    // Pick the most-frequent non-null album_type across the tracks
+    // (rare but possible to have mixed values mid-fix).
+    const typeCounts: Record<string, number> = {};
+    for (const t of albumTracks) {
+      const k = (t.album_type || "").toLowerCase();
+      if (k) typeCounts[k] = (typeCounts[k] || 0) + 1;
+    }
+    const mbType = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
+    let albumType: "compilation" | "single" | "ep" | "soundtrack" | "album" = "album";
+    if (mbType === "single") albumType = "single";
+    else if (mbType === "ep") albumType = "ep";
+    else if (mbType === "compilation" || anyCompilation) albumType = "compilation";
+    else if (mbType === "soundtrack") albumType = "soundtrack";
     const albumInfo = {
       album: first.album,
       albumArtist: first.album_artist || first.artist,
