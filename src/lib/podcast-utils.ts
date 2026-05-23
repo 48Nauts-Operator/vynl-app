@@ -2,6 +2,9 @@ import Parser from "rss-parser";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
+import { db } from "@/lib/db";
+import { podcastEpisodes } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 
 const parserOptions = {
   customFields: {
@@ -138,6 +141,32 @@ export function getEpisodeFilePath(
   const ext = path.extname(new URL(audioUrl).pathname) || ".mp3";
   const base = getPodcastStoragePath();
   return path.join(base, `podcast-${podcastId}`, `episode-${episodeId}${ext}`);
+}
+
+/**
+ * Download an episode's audio file to local storage and mark it as downloaded.
+ * Idempotent: returns early if `isDownloaded` is already true.
+ * Throws on network / fs errors so the caller can decide whether to surface them
+ * (foreground POST) or swallow them (background auto-download after subscribe).
+ */
+export async function startEpisodeDownload(episodeId: number): Promise<void> {
+  const episode = db
+    .select()
+    .from(podcastEpisodes)
+    .where(eq(podcastEpisodes.id, episodeId))
+    .get();
+
+  if (!episode) throw new Error(`Episode ${episodeId} not found`);
+  if (episode.isDownloaded) return;
+
+  const destPath = getEpisodeFilePath(episode.podcastId, episode.id, episode.audioUrl);
+  await downloadFile(episode.audioUrl, destPath);
+
+  const stat = fs.statSync(destPath);
+  db.update(podcastEpisodes)
+    .set({ localPath: destPath, isDownloaded: true, fileSize: stat.size })
+    .where(eq(podcastEpisodes.id, episode.id))
+    .run();
 }
 
 export function formatPodcastDuration(seconds: number | null): string {

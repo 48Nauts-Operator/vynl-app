@@ -2,54 +2,24 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { podcastEpisodes } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { downloadFile, getEpisodeFilePath } from "@/lib/podcast-utils";
-import * as fs from "fs";
+import { startEpisodeDownload } from "@/lib/podcast-utils";
 
-// Module-level download job state
+// Module-level singleton state for foreground (user-initiated) downloads.
+// Background auto-downloads from the subscribe route call startEpisodeDownload
+// directly and do NOT touch this state — it's purely a UI-polling concern.
 let downloadJob: {
   episodeId: number;
   status: "downloading" | "complete" | "error";
   error?: string;
 } | null = null;
 
-async function runDownload(
-  episodeId: number,
-  podcastId: number,
-  audioUrl: string
-) {
-  try {
-    const destPath = getEpisodeFilePath(podcastId, episodeId, audioUrl);
-    await downloadFile(audioUrl, destPath);
-
-    const stat = fs.statSync(destPath);
-    db.update(podcastEpisodes)
-      .set({
-        localPath: destPath,
-        isDownloaded: true,
-        fileSize: stat.size,
-      })
-      .where(eq(podcastEpisodes.id, episodeId))
-      .run();
-
-    if (downloadJob) {
-      downloadJob.status = "complete";
-    }
-  } catch (err) {
-    if (downloadJob) {
-      downloadJob.status = "error";
-      downloadJob.error = String(err);
-    }
-  }
-}
-
-// POST — start downloading an episode
+// POST — start downloading an episode (foreground, with UI polling)
 export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string; episodeId: string }> }
 ) {
-  const { id, episodeId } = await params;
+  const { episodeId } = await params;
   const epId = parseInt(episodeId);
-  const podId = parseInt(id);
 
   if (downloadJob && downloadJob.status === "downloading") {
     return NextResponse.json(
@@ -74,8 +44,19 @@ export async function POST(
 
   downloadJob = { episodeId: epId, status: "downloading" };
 
-  // Fire and forget
-  runDownload(epId, podId, episode.audioUrl);
+  // Fire and forget — update UI state when it finishes.
+  startEpisodeDownload(epId)
+    .then(() => {
+      if (downloadJob && downloadJob.episodeId === epId) {
+        downloadJob.status = "complete";
+      }
+    })
+    .catch((err) => {
+      if (downloadJob && downloadJob.episodeId === epId) {
+        downloadJob.status = "error";
+        downloadJob.error = String(err);
+      }
+    });
 
   return NextResponse.json({ status: "downloading", episodeId: epId });
 }
