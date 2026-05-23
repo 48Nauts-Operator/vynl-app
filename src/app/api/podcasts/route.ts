@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { podcasts, podcastEpisodes } from "@/lib/db/schema";
 import { eq, sql, desc } from "drizzle-orm";
-import { parseFeed, downloadCoverArt } from "@/lib/podcast-utils";
+import { parseFeed, downloadCoverArt, startEpisodeDownload } from "@/lib/podcast-utils";
 
 // GET — list all podcasts with episode counts
 export async function GET() {
@@ -28,11 +28,21 @@ export async function GET() {
 // POST — subscribe to a new podcast
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { feedUrl } = body;
+  const { feedUrl, autoDownloadLatest: autoDLRaw } = body as {
+    feedUrl?: unknown;
+    autoDownloadLatest?: unknown;
+  };
 
   if (!feedUrl || typeof feedUrl !== "string") {
     return NextResponse.json({ error: "feedUrl is required" }, { status: 400 });
   }
+
+  // Clamp autoDownloadLatest to [0, 10] — defaults to 0 (metadata-only).
+  const autoDownloadLatest = (() => {
+    const n = typeof autoDLRaw === "number" ? autoDLRaw : 0;
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.min(Math.floor(n), 10);
+  })();
 
   // Check for duplicate
   const existing = db
@@ -79,8 +89,10 @@ export async function POST(request: NextRequest) {
     .returning()
     .get();
 
-  // Insert episodes
+  // Insert episodes. Track skipped count separately so the UI can
+  // surface "imported 142 (3 skipped)" instead of silently dropping rows.
   let insertedCount = 0;
+  let skippedCount = 0;
   for (const ep of parsed.episodes) {
     try {
       db.insert(podcastEpisodes)
@@ -98,12 +110,36 @@ export async function POST(request: NextRequest) {
         .run();
       insertedCount++;
     } catch {
-      // Skip duplicate guids
+      skippedCount++;
+    }
+  }
+
+  // Auto-download the N newest episodes in the background. Sort by pubDate
+  // desc so we get the latest regardless of feed order; fall back to id desc
+  // for feeds without pubDate. Fire-and-forget — failures log but don't
+  // block the response since the subscribe itself succeeded.
+  let autoDownloadStarted = 0;
+  if (autoDownloadLatest > 0 && insertedCount > 0) {
+    const latest = db
+      .select({ id: podcastEpisodes.id })
+      .from(podcastEpisodes)
+      .where(eq(podcastEpisodes.podcastId, podcast.id))
+      .orderBy(desc(podcastEpisodes.pubDate), desc(podcastEpisodes.id))
+      .limit(autoDownloadLatest)
+      .all();
+
+    for (const row of latest) {
+      autoDownloadStarted++;
+      void startEpisodeDownload(row.id).catch((err) => {
+        console.error(`[podcasts] auto-download episode ${row.id} failed:`, err);
+      });
     }
   }
 
   return NextResponse.json({
     podcast,
     episodesImported: insertedCount,
+    episodesSkipped: skippedCount,
+    autoDownloadStarted,
   });
 }
