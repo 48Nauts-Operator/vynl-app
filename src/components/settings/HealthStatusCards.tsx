@@ -56,37 +56,45 @@ export function HealthStatusCards() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/settings/flight-check", { cache: "no-store" });
+        // The real route is /api/flight-check (no /settings prefix).
+        // Response: { checks: [{label, status, message}], summary, ranAt }
+        // status values: "ok" | "warn" | "error" | "info".
+        const res = await fetch("/api/flight-check", { cache: "no-store" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (cancelled) return;
-        // The flight-check endpoint returns a list of named checks. We
-        // pick the three we care about for the top-line summary. If a
-        // specific check is missing the card stays as a warning so we
-        // don't claim everything is green.
-        const checks: Array<{ name: string; ok: boolean; message?: string }> =
-          data.checks || data.results || [];
+        const checks: Array<{ label: string; status: string; message?: string }> =
+          data.checks || [];
         const find = (needle: string) =>
-          checks.find((c) => c.name.toLowerCase().includes(needle));
+          checks.find((c) => c.label.toLowerCase().includes(needle));
         const map = (
-          c: { ok: boolean; message?: string } | undefined,
+          c: { status: string; message?: string } | undefined,
           fallback: string
-        ): { status: Status; message: string } =>
-          !c
-            ? { status: "warning", message: "Not reported" }
-            : c.ok
-              ? { status: "ok", message: c.message || fallback }
-              : { status: "error", message: c.message || "Failed" };
+        ): { status: Status; message: string } => {
+          if (!c) return { status: "warning", message: "Not reported" };
+          switch (c.status) {
+            case "ok":
+            case "info":
+              return { status: "ok", message: c.message || fallback };
+            case "warn":
+              return { status: "warning", message: c.message || "Warning" };
+            case "error":
+              return { status: "error", message: c.message || "Failed" };
+            default:
+              return { status: "warning", message: c.message || c.status };
+          }
+        };
 
         setRows([
           { key: "llm", label: "LLM", icon: BrainCircuit, ...map(find("llm"), "Reachable") },
-          { key: "music", label: "Music Library", icon: FolderOpen, ...map(find("music") || find("beets"), "Mounted") },
-          { key: "db", label: "Vynl DB", icon: Database, ...map(find("vynl") || find("db"), "Open") },
+          { key: "music", label: "Music Library", icon: FolderOpen, ...map(find("music library") || find("beets"), "Mounted") },
+          { key: "db", label: "Vynl DB", icon: Database, ...map(find("sqlite") || find("database"), "Open") },
         ]);
       } catch (err) {
         if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
         setRows((prev) =>
-          prev.map((r) => ({ ...r, status: "warning" as Status, message: `Probe failed: ${String(err).slice(0, 40)}` }))
+          prev.map((r) => ({ ...r, status: "warning" as Status, message: `Probe failed: ${msg.slice(0, 80)}` }))
         );
       }
     })();
