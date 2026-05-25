@@ -90,8 +90,27 @@ interface MissingTrack {
   playlistNames: string[];
 }
 
-type View = "loading" | "syncing" | "browse" | "review";
+type View = "loading" | "syncing" | "browse" | "review" | "downloading";
 type SortMode = "artist" | "title" | "album" | "popularity";
+
+interface DownloadJob {
+  status: "idle" | "running" | "complete" | "cancelled";
+  total: number;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  alreadyHad: number;
+  currentTrack?: string;
+  results: Array<{
+    spotifyTrackId: number;
+    title: string;
+    artist: string;
+    outcome: "success" | "not_found" | "already_local";
+    error?: string;
+  }>;
+  startedAt?: string;
+  completedAt?: string;
+}
 
 export default function MigrationPage() {
   const router = useRouter();
@@ -117,7 +136,10 @@ export default function MigrationPage() {
   } | null>(null);
   const [banner, setBanner] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
+  const [downloadJob, setDownloadJob] = useState<DownloadJob | null>(null);
+
   const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const dlPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Initial load: check snapshot, decide what to render ─────────────
 
@@ -337,6 +359,57 @@ export default function MigrationPage() {
     setBanner({ kind: "ok", text: `Skipped ${ids.length}` });
   };
 
+  const downloadViaSpotdl = async (ids: number[]) => {
+    if (ids.length === 0) return;
+    try {
+      const res = await fetch("/api/spotify/migration/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spotifyTrackIds: ids }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setBanner({ kind: "err", text: data?.error || "Download failed to start" });
+        return;
+      }
+      setView("downloading");
+      // Begin polling. Cancels any prior poll.
+      if (dlPollRef.current) clearInterval(dlPollRef.current);
+      dlPollRef.current = setInterval(async () => {
+        try {
+          const r = await fetch("/api/spotify/migration/download");
+          const j = (await r.json()) as DownloadJob;
+          setDownloadJob(j);
+          if (j.status === "complete" || j.status === "cancelled") {
+            if (dlPollRef.current) clearInterval(dlPollRef.current);
+            dlPollRef.current = null;
+          }
+        } catch {
+          // ignore transient poll errors
+        }
+      }, 1500);
+    } catch (err) {
+      setBanner({ kind: "err", text: String(err) });
+    }
+  };
+
+  const cancelDownload = async () => {
+    try {
+      await fetch("/api/spotify/migration/download", { method: "DELETE" });
+    } catch {}
+  };
+
+  const finishDownload = () => {
+    if (dlPollRef.current) {
+      clearInterval(dlPollRef.current);
+      dlPollRef.current = null;
+    }
+    setDownloadJob(null);
+    setReview(null);
+    setSelectedTrackIds(new Set());
+    setView("browse");
+  };
+
   const finishReview = () => {
     setReview(null);
     setSelectedTrackIds(new Set());
@@ -388,6 +461,122 @@ export default function MigrationPage() {
     );
   }
 
+  if (view === "downloading") {
+    const j = downloadJob;
+    const done = j?.status === "complete" || j?.status === "cancelled";
+    const pct = j && j.total > 0 ? Math.round((j.processed / j.total) * 100) : 0;
+    return (
+      <div className="p-6 space-y-4 max-w-3xl mx-auto">
+        <h1 className="text-3xl font-bold">
+          {done ? "Migration complete" : "Downloading via spotDL"}
+        </h1>
+        <Card>
+          <CardContent className="p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              {done ? (
+                <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+              ) : (
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              )}
+              <div className="flex-1">
+                <p className="font-medium">
+                  {done
+                    ? j?.status === "cancelled"
+                      ? "Cancelled"
+                      : "Done — your library has been updated"
+                    : j?.currentTrack || "Starting..."}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {j ? `${j.processed} / ${j.total} processed` : ""}
+                </p>
+              </div>
+            </div>
+
+            <div className="h-2 bg-secondary rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all duration-300"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+
+            <div className="grid grid-cols-4 gap-3 text-center">
+              <Stat label="Downloaded" value={j?.succeeded ?? 0} />
+              <Stat label="Already local" value={j?.alreadyHad ?? 0} />
+              <Stat label="Not found" value={j?.failed ?? 0} />
+              <Stat label="Total" value={j?.total ?? 0} />
+            </div>
+
+            {j && j.results.length > 0 && (
+              <div className="rounded-md border border-border max-h-[40vh] overflow-y-auto divide-y divide-border">
+                {j.results
+                  .slice()
+                  .reverse()
+                  .slice(0, 200)
+                  .map((r) => (
+                    <div
+                      key={`${r.spotifyTrackId}-${r.outcome}`}
+                      className="px-3 py-1.5 flex items-center gap-2 text-sm"
+                    >
+                      {r.outcome === "success" ? (
+                        <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                      ) : r.outcome === "already_local" ? (
+                        <CheckCircle2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                      ) : (
+                        <XCircle className="h-4 w-4 text-amber-400 shrink-0" />
+                      )}
+                      <span className="flex-1 truncate">
+                        <span className="font-medium">{r.title}</span>
+                        <span className="text-muted-foreground"> — {r.artist}</span>
+                      </span>
+                      <span
+                        className={`text-xs shrink-0 ${
+                          r.outcome === "not_found"
+                            ? "text-amber-400"
+                            : r.outcome === "already_local"
+                              ? "text-muted-foreground"
+                              : "text-emerald-400"
+                        }`}
+                      >
+                        {r.outcome === "success"
+                          ? "downloaded"
+                          : r.outcome === "already_local"
+                            ? "already local"
+                            : "not found"}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-2">
+              {!done && (
+                <Button variant="outline" onClick={cancelDownload}>
+                  Cancel
+                </Button>
+              )}
+              {done && (
+                <>
+                  <Button onClick={finishDownload}>Back to wizard</Button>
+                  {j && j.failed > 0 && (
+                    <Button variant="outline" onClick={() => router.push("/wishlist?status=not_found")}>
+                      View Not Found ({j.failed})
+                    </Button>
+                  )}
+                </>
+              )}
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              Successful downloads land in <code className="text-foreground">MUSIC_LIBRARY_PATH</code>;
+              the file watcher imports them to beets &amp; Vynl. Not-found tracks are pushed to
+              your wishlist with status &ldquo;not_found&rdquo; so you can try a different source later.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   if (view === "review" && review) {
     const remaining = review.missing.filter((m) => !review.actioned.has(m.id));
     return (
@@ -404,15 +593,23 @@ export default function MigrationPage() {
             </p>
           </div>
           {remaining.length > 0 && (
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button
+                onClick={() => downloadViaSpotdl(remaining.map((r) => r.id))}
+                disabled={remaining.length === 0}
+              >
+                <Loader2 className="h-4 w-4 mr-2" />
+                Download {remaining.length} via spotDL
+              </Button>
+              <Button
+                variant="outline"
                 onClick={() => addToWishlist(remaining.map((r) => r.id))}
                 disabled={remaining.length === 0}
               >
                 <ListChecks className="h-4 w-4 mr-2" />
-                Add all {remaining.length} to Wishlist
+                Just wishlist (no download)
               </Button>
-              <Button variant="outline" onClick={() => skip(remaining.map((r) => r.id))}>
+              <Button variant="ghost" onClick={() => skip(remaining.map((r) => r.id))}>
                 Skip all
               </Button>
             </div>
@@ -476,7 +673,17 @@ export default function MigrationPage() {
                     <Button
                       size="sm"
                       variant="default"
+                      onClick={() => downloadViaSpotdl([m.id])}
+                      title="Download via spotDL — file lands in your library"
+                    >
+                      <Loader2 className="h-3.5 w-3.5 mr-1.5" />
+                      Download
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
                       onClick={() => addToWishlist([m.id])}
+                      title="Add to wishlist without downloading"
                     >
                       <ListChecks className="h-3.5 w-3.5 mr-1.5" />
                       Wishlist
