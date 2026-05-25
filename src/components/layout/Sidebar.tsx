@@ -29,6 +29,7 @@ import {
   Heart,
   Package,
   GitBranch,
+  ListChecks,
 } from "lucide-react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -42,6 +43,11 @@ interface NavItem {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   featureKey?: keyof FeatureFlags;
+  /**
+   * Dynamic visibility gate (orthogonal to static feature flags).
+   * "spotifyConnected" — show only when /api/spotify/status returns connected:true.
+   */
+  gateOn?: "spotifyConnected";
 }
 
 interface NavGroup {
@@ -67,6 +73,7 @@ const navEntries: NavEntry[] = [
     items: [
       { href: "/discover", label: "Discover", icon: Compass, featureKey: "discover" },
       { href: "/wishlist", label: "Wishlist", icon: Heart },
+      { href: "/migration", label: "Spotify Migration", icon: ListChecks, gateOn: "spotifyConnected" },
       { href: "/profile", label: "Taste Profile", icon: User, featureKey: "tasteProfile" },
       { href: "/youtube", label: "YouTube", icon: Youtube, featureKey: "youtube" },
     ],
@@ -104,6 +111,36 @@ interface ImportJobStatus {
   postProcessing?: boolean;
 }
 
+/**
+ * Poll /api/spotify/status so the sidebar can show/hide the Spotify
+ * Migration entry without requiring a page reload after Connect.
+ * Refetches when the user switches routes (re-mount catches a fresh
+ * post-OAuth state) and every 60s as a safety net.
+ */
+function useSpotifyConnected(): boolean {
+  const [connected, setConnected] = useState(false);
+  useEffect(() => {
+    let active = true;
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/spotify/status");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (active) setConnected(!!data?.connected);
+      } catch {
+        // ignore
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 60_000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
+  return connected;
+}
+
 function useImportStatus() {
   const [job, setJob] = useState<ImportJobStatus>({ status: "idle" });
 
@@ -136,6 +173,7 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const importJob = useImportStatus();
   const features = useSettingsStore((s) => s.features);
+  const spotifyConnected = useSpotifyConnected();
   const isImporting = importJob.status === "running";
   const importProgress =
     isImporting && importJob.total
@@ -176,10 +214,13 @@ export function Sidebar() {
     });
   };
 
-  // Feature-flag filter applied uniformly to flat items and section
-  // contents; sections with zero visible items render no header.
-  const filterByFlags = (item: NavItem) =>
-    !item.featureKey || features[item.featureKey];
+  // Feature-flag + dynamic-gate filter applied uniformly to flat items
+  // and section contents; sections with zero visible items render no header.
+  const filterByFlags = (item: NavItem) => {
+    if (item.featureKey && !features[item.featureKey]) return false;
+    if (item.gateOn === "spotifyConnected" && !spotifyConnected) return false;
+    return true;
+  };
 
   const visibleEntries: NavEntry[] = navEntries
     .map((e) => {
