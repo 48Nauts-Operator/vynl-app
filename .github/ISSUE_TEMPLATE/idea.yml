@@ -1,0 +1,46 @@
+name: 💡 Idea
+description: A rough idea or "wouldn't it be cool if..." suggestion
+title: "[Idea]: "
+labels: ["idea", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Rough ideas are welcome — this is for things that aren't fully baked feature
+        requests yet. For more open-ended "what do you think about..." conversations,
+        consider [Discussions](https://github.com/48Nauts-Operator/vynl-app/discussions)
+        instead.
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What's the idea? Doesn't need to be detailed yet.
+      placeholder: It'd be cool if Vynl could...
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it would be useful
+      description: What problem does it solve? When would you use it?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Roughly which area?
+      options:
+        - Library / catalog
+        - Playback / Sonos
+        - Spotify migration
+        - Podcasts
+        - DJ / party
+        - Stats / discovery
+        - Settings / config
+        - Mobile (iOS)
+        - Other / not sure
+    validations:
+      required: false
