@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vynl — Operations Cheatsheet</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --panel: #121212;
+    --panel-2: #181818;
+    --border: #2a2a2a;
+    --text: #e5e5e5;
+    --muted: #888;
+    --accent: #1DB954;
+    --danger: #ef4444;
+    --warn: #f59e0b;
+    --link: #a78bfa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    max-width: 1200px;
+    margin: 0 auto;
+    gap: 24px;
+    padding: 24px;
+  }
+  aside {
+    position: sticky;
+    top: 24px;
+    align-self: start;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    padding-right: 8px;
+  }
+  aside h2 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin: 0 0 8px;
+  }
+  aside ul { list-style: none; padding: 0; margin: 0 0 16px; }
+  aside li { margin: 2px 0; }
+  aside a {
+    color: var(--text);
+    text-decoration: none;
+    display: block;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 13px;
+  }
+  aside a:hover { background: var(--panel); }
+  header {
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+    padding-bottom: 12px;
+  }
+  header h1 { margin: 0 0 4px; font-size: 24px; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+  section {
+    margin-bottom: 36px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 20px;
+  }
+  section h2 {
+    margin: 0 0 6px;
+    font-size: 17px;
+    color: var(--text);
+  }
+  section .lede {
+    color: var(--muted);
+    margin: 0 0 16px;
+    font-size: 13px;
+  }
+  h3 {
+    margin: 18px 0 8px;
+    font-size: 14px;
+    color: var(--text);
+  }
+  p { margin: 6px 0; }
+  .danger {
+    border-left: 3px solid var(--danger);
+    background: rgba(239, 68, 68, 0.05);
+    padding: 8px 12px;
+    margin: 8px 0;
+    border-radius: 0 6px 6px 0;
+    font-size: 13px;
+  }
+  .warn {
+    border-left: 3px solid var(--warn);
+    background: rgba(245, 158, 11, 0.05);
+    padding: 8px 12px;
+    margin: 8px 0;
+    border-radius: 0 6px 6px 0;
+    font-size: 13px;
+  }
+  .ok {
+    border-left: 3px solid var(--accent);
+    background: rgba(29, 185, 84, 0.05);
+    padding: 8px 12px;
+    margin: 8px 0;
+    border-radius: 0 6px 6px 0;
+    font-size: 13px;
+  }
+  .cmd {
+    position: relative;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin: 10px 0;
+    overflow: hidden;
+  }
+  .cmd .label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 12px;
+    background: #0e0e0e;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .cmd .copy {
+    cursor: pointer;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .cmd .copy:hover { background: var(--border); }
+  .cmd .copy.done { color: var(--accent); border-color: var(--accent); }
+  .cmd pre {
+    margin: 0;
+    padding: 12px 14px;
+    font: 12.5px/1.5 "JetBrains Mono", "SF Mono", Consolas, monospace;
+    color: var(--text);
+    overflow-x: auto;
+    white-space: pre;
+  }
+  code.inline {
+    background: var(--panel-2);
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
+    font-size: 12px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8px 0;
+    font-size: 13px;
+  }
+  th, td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    vertical-align: top;
+  }
+  th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; }
+  a { color: var(--link); }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside>
+    <h2>Reference</h2>
+    <ul>
+      <li><a href="#hosts">Hosts &amp; URLs</a></li>
+    </ul>
+    <h2>Container &amp; Infra</h2>
+    <ul>
+      <li><a href="#container">Container ops</a></li>
+      <li><a href="#dev">Local dev server</a></li>
+      <li><a href="#dozzle">Dozzle (log viewer)</a></li>
+      <li><a href="#tailscale">Tailscale HTTPS</a></li>
+    </ul>
+    <h2>Vynl Database</h2>
+    <ul>
+      <li><a href="#vynl-db">DB inspection</a></li>
+      <li><a href="#settings-keys">API keys storage</a></li>
+      <li><a href="#wishlist-cleanup">Wishlist cleanup</a></li>
+    </ul>
+    <h2>Spotify</h2>
+    <ul>
+      <li><a href="#spotify">Migration wizard</a></li>
+    </ul>
+    <h2>Lidarr</h2>
+    <ul>
+      <li><a href="#lidarr">Cleanup &amp; wanted list</a></li>
+    </ul>
+    <h2>Sonos</h2>
+    <ul>
+      <li><a href="#sonos-diag">Diagnostics</a></li>
+    </ul>
+    <h2>Release</h2>
+    <ul>
+      <li><a href="#release">Release flow</a></li>
+    </ul>
+  </aside>
+
+  <main>
+    <header>
+      <h1>Vynl — Operations Cheatsheet</h1>
+      <p>Reference for the ops + debug commands used across sessions. Click any <strong>Copy</strong>
+        to grab the snippet. Substitute values like <code class="inline">&lt;your_id&gt;</code> before running.</p>
+    </header>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <section id="hosts">
+      <h2>Hosts &amp; URLs</h2>
+      <p class="lede">Where things live. Cosmos's LAN IP is <em>static</em> at <code class="inline">192.168.74.79</code>;
+        if a Sonos error says "unable to connect to &lt;other IP&gt;", the <code class="inline">VYNL_HOST</code>
+        env var is wrong.</p>
+      <table>
+        <tr><th>Surface</th><th>URL</th><th>DB</th></tr>
+        <tr><td>Local dev (Mac)</td><td><code class="inline">http://localhost:3101</code></td><td><code class="inline">&lt;repo&gt;/vynl.db</code></td></tr>
+        <tr><td>Cosmos LAN</td><td><code class="inline">http://192.168.74.79:3101</code></td><td><code class="inline">/app/data/vynl.db</code> in container</td></tr>
+        <tr><td>Cosmos Tailscale</td><td><code class="inline">http://100.119.120.45:3101</code></td><td>(same)</td></tr>
+        <tr><td>Cosmos Tailscale HTTPS</td><td><code class="inline">https://cosmos.tail138398.ts.net/</code></td><td>(same)</td></tr>
+        <tr><td>Dozzle (logs)</td><td><code class="inline">http://100.119.120.45:8181/</code></td><td>—</td></tr>
+        <tr><td>Forgejo</td><td><code class="inline">http://cosmos.tail138398.ts.net:3000/</code></td><td>—</td></tr>
+        <tr><td>Lidarr</td><td><code class="inline">http://192.168.74.79:8686/</code></td><td>—</td></tr>
+      </table>
+    </section>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <section id="container">
+      <h2>Container ops</h2>
+      <p class="lede">All of these run on cosmos shell (jarvis@COSMOS).</p>
+
+      <h3>Health snapshot</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos shell</span><button class="copy">Copy</button></div>
+<pre>docker ps --filter name=vynl --format 'table {{.Names}}\t{{.Status}}\t{{.RunningFor}}'
+docker inspect vynl --format 'mode={{.HostConfig.NetworkMode}} state={{.State.Status}}'
+docker logs vynl --tail 50 2>&amp;1 | tail -50</pre>
+      </div>
+
+      <h3>What version is running?</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos shell</span><button class="copy">Copy</button></div>
+<pre>docker exec vynl node -e "console.log('version:', require('/app/package.json').version)"
+docker inspect vynl --format 'image={{.Config.Image}} id={{.Image}}'</pre>
+      </div>
+
+      <h3>What env does Vynl see?</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos shell</span><button class="copy">Copy</button></div>
+<pre>docker exec vynl env | grep -E 'VYNL_HOST|NEXT_PUBLIC|SPOTIFY|ANTHROPIC|REPLICATE|YOUTUBE|ACOUSTID'</pre>
+      </div>
+
+      <h3>Self-fetch from inside the container (no curl/wget inside)</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos shell</span><button class="copy">Copy</button></div>
+<pre>docker exec vynl node -e "fetch('http://localhost:3101/api/stats').then(r=&gt;r.text()).then(t=&gt;console.log(t.slice(0,200))).catch(e=&gt;console.log('ERR',e.code,e.message))"</pre>
+      </div>
+    </section>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <section id="vynl-db">
+      <h2>Vynl DB inspection</h2>
+      <p class="lede">Container has no <code class="inline">sqlite3</code> CLI; use <code class="inline">node + better-sqlite3</code>.
+        Default DB paths above.</p>
+
+      <h3>Find the actual DB path in the container</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos shell</span><button class="copy">Copy</button></div>
+<pre>docker exec vynl sh -c 'echo "VYNL_DB_DIR=${VYNL_DB_DIR:-(cwd)}"; ls -la "${VYNL_DB_DIR:-/app}/vynl.db" 2&gt;/dev/null || find / -name "vynl.db" -not -path "/proc/*" 2&gt;/dev/null'</pre>
+      </div>
+
+      <h3>List all app_settings (Spotify creds, AcoustID, etc.)</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos shell · production</span><button class="copy">Copy</button></div>
+<pre>docker exec vynl node -e "
+const db = require('better-sqlite3')('/app/data/vynl.db',{readonly:true});
+console.log(db.prepare('SELECT key, length(value) AS len FROM app_settings ORDER BY key').all());
+"</pre>
+      </div>
+
+      <h3>Same, but local dev DB</h3>
+      <div class="cmd">
+        <div class="label"><span>Mac · local dev</span><button class="copy">Copy</button></div>
+<pre>node -e "
+const db = require('better-sqlite3')('./vynl.db',{readonly:true});
+console.log(db.prepare('SELECT key, length(value) AS len FROM app_settings ORDER BY key').all());
+"</pre>
+      </div>
+    </section>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <section id="settings-keys">
+      <h2>API keys via the /api/settings/keys endpoint</h2>
+      <p class="lede">When the UI Save button silently drops the write (bug, task #81), set keys directly via curl.
+        Don't paste secrets to a chat — paste them straight into the command on cosmos.</p>
+
+      <h3>Read current state (masks secrets)</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos shell</span><button class="copy">Copy</button></div>
+<pre>curl -sS http://localhost:3101/api/settings/keys | python3 -m json.tool</pre>
+      </div>
+
+      <h3>Set a key (server reads DB first, env fallback)</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos shell</span><button class="copy">Copy</button></div>
+<pre>curl -sS -X PUT http://localhost:3101/api/settings/keys \
+  -H "Content-Type: application/json" \
+  -d '{"key":"spotifyClientId","value":"&lt;real_id_32_chars&gt;"}'
+
+curl -sS -X PUT http://localhost:3101/api/settings/keys \
+  -H "Content-Type: application/json" \
+  -d '{"key":"spotifyClientSecret","value":"&lt;real_secret_32_chars&gt;"}'
+
+curl -sS -X PUT http://localhost:3101/api/settings/keys \
+  -H "Content-Type: application/json" \
+  -d '{"key":"spotifyRedirectUri","value":"https://cosmos.tail138398.ts.net/api/spotify/callback"}'</pre>
+      </div>
+
+      <h3>Clear a key (revert to env fallback)</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos shell</span><button class="copy">Copy</button></div>
+<pre>curl -sS -X DELETE "http://localhost:3101/api/settings/keys?key=spotifyClientId"</pre>
+      </div>
+
+      <p>Registered keys: <code class="inline">anthropic</code>, <code class="inline">replicate</code>,
+        <code class="inline">acoustid</code>, <code class="inline">spotifyClientId</code>,
+        <code class="inline">spotifyClientSecret</code>, <code class="inline">spotifyRedirectUri</code>,
+        <code class="inline">youtube</code>.</p>
+    </section>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <section id="wishlist-cleanup">
+      <h2>Wishlist cleanup</h2>
+      <p class="lede">The 7-phase extract used to dump every unmatched Spotify track into
+        <code class="inline">wish_list</code> with <code class="inline">type='spotify_missing'</code>.
+        Clean up leftovers.</p>
+
+      <h3>Inspect first</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos / mac</span><button class="copy">Copy</button></div>
+<pre>node -e "
+const db = require('better-sqlite3')('./vynl.db',{readonly:true});
+const counts = db.prepare(\"SELECT type, COUNT(*) AS n FROM wish_list GROUP BY type\").all();
+console.log('by type:', counts);
+const recent = db.prepare(\"SELECT MIN(created_at) AS oldest, MAX(created_at) AS newest FROM wish_list\").get();
+console.log('range:', recent);
+"</pre>
+      </div>
+
+      <h3>Nuke leftover spotify_missing only (keep today's curated rows)</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos / mac</span><button class="copy">Copy</button></div>
+<pre>node -e "
+const db = require('better-sqlite3')('./vynl.db');
+const r = db.prepare(\"DELETE FROM wish_list WHERE type='spotify_missing' AND created_at &lt; date('now')\").run();
+console.log('deleted:', r.changes);
+"</pre>
+      </div>
+
+      <h3>Nuke ALL wishlist rows</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos / mac · destructive</span><button class="copy">Copy</button></div>
+<pre>node -e "
+const db = require('better-sqlite3')('./vynl.db');
+const before = db.prepare('SELECT COUNT(*) AS n FROM wish_list').get();
+const r = db.prepare('DELETE FROM wish_list').run();
+console.log('before:', before.n, '· deleted:', r.changes);
+"</pre>
+      </div>
+
+      <div class="warn">In container: swap <code class="inline">./vynl.db</code> for <code class="inline">/app/data/vynl.db</code>
+        and prefix with <code class="inline">docker exec vynl</code>.</div>
+    </section>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <section id="lidarr">
+      <h2>Lidarr cleanup</h2>
+      <p class="lede">When the Lidarr push goes wide (the 122 GB / 73 album disaster path), use these to unwind.
+        Need your Lidarr URL + API key (Lidarr → Settings → General → Security).</p>
+
+      <h3>Variables (set once per shell)</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos shell</span><button class="copy">Copy</button></div>
+<pre>LIDARR=http://192.168.74.79:8686
+KEY=&lt;your_api_key&gt;</pre>
+      </div>
+
+      <h3>Inspect: how many artists / missing albums?</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos shell</span><button class="copy">Copy</button></div>
+<pre>echo "ARTISTS:"
+curl -sS -H "X-Api-Key: $KEY" "$LIDARR/api/v1/artist" \
+  | python3 -c "import json,sys; a=json.load(sys.stdin); print(len(a),'artists'); [print(f' {x[\"id\"]:&gt;5}  {x[\"artistName\"]}') for x in a[:20]]"
+
+echo
+echo "MISSING ALBUMS (Wanted list):"
+curl -sS -H "X-Api-Key: $KEY" "$LIDARR/api/v1/wanted/missing?pageSize=5&amp;monitored=true" \
+  | python3 -c "import json,sys; r=json.load(sys.stdin); print(r['totalRecords'],'missing total')"</pre>
+      </div>
+
+      <h3>Empty the Wanted/Missing list (unmonitor, keep artists + files)</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos shell</span><button class="copy">Copy</button></div>
+<pre>ids=$(curl -sS -H "X-Api-Key: $KEY" "$LIDARR/api/v1/wanted/missing?pageSize=5000&amp;monitored=true" \
+  | python3 -c "import json,sys; r=json.load(sys.stdin)['records']; print(','.join(str(a['id']) for a in r))")
+
+# bulk unmonitor (single PUT)
+curl -sS -X PUT -H "X-Api-Key: $KEY" -H "Content-Type: application/json" \
+  "$LIDARR/api/v1/album/monitor" \
+  -d "{\"albumIds\":[$ids],\"monitored\":false}" | head -c 200
+
+# confirm
+curl -sS -H "X-Api-Key: $KEY" "$LIDARR/api/v1/wanted/missing?monitored=true" \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)['totalRecords'],'still missing')"</pre>
+      </div>
+
+      <div class="warn">Lidarr's SQLite can lock up when its background "Search for Missing" task is running.
+        First request can take 30–90 s. If it stays blinking past ~2 min, Ctrl+C and check <strong>Lidarr UI → System → Tasks</strong>.</div>
+
+      <h3>Delete all artists (files stay on disk)</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos shell · destructive</span><button class="copy">Copy</button></div>
+<pre>curl -sS -H "X-Api-Key: $KEY" "$LIDARR/api/v1/artist" \
+  | python3 -c "import json,sys; print('\n'.join(str(x['id']) for x in json.load(sys.stdin)))" \
+  | xargs -I{} curl -sS -X DELETE -H "X-Api-Key: $KEY" "$LIDARR/api/v1/artist/{}?deleteFiles=false&amp;addImportListExclusion=true"
+
+curl -sS -H "X-Api-Key: $KEY" "$LIDARR/api/v1/artist" | python3 -c "import json,sys; print(len(json.load(sys.stdin)),'remaining')"</pre>
+      </div>
+
+      <h3>Lidarr UI cheat — same things, slower but clearer</h3>
+      <ul>
+        <li><strong>Wanted → Missing</strong>: bump page size → select all → Unmonitor Selected.</li>
+        <li><strong>Library → Artists</strong>: Options → Mass Editor → select all → Delete (uncheck "Delete artist files", check "Add list exclusion").</li>
+        <li><strong>Activity → Queue</strong>: remove anything mid-grab; "Remove from download client" if you don't want it.</li>
+      </ul>
+    </section>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <section id="sonos-diag">
+      <h2>Sonos diagnostics</h2>
+      <p class="lede">v0.6.22+ logs every Sonos request as <code class="inline">[sonos &lt;reqId&gt;] ...</code>.
+        Watch in Dozzle or via docker logs.</p>
+
+      <h3>Tail Sonos lines as you Play</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos shell</span><button class="copy">Copy</button></div>
+<pre>docker logs -f vynl 2>&amp;1 | grep -E '\[sonos|UPnP'</pre>
+      </div>
+
+      <h3>Verify env IP matches cosmos's actual IP</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos shell</span><button class="copy">Copy</button></div>
+<pre>docker exec vynl env | grep VYNL_HOST    # what Vynl sees
+hostname -I                              # what cosmos actually is</pre>
+      </div>
+
+      <div class="danger"><strong>Failure mode lookup</strong>:
+        <ul>
+          <li>Sonos app "Unable to connect to &lt;IP&gt;" → URL host unreachable. Check env vs actual IP.</li>
+          <li><code class="inline">UPnPError 701 (Transition not available)</code> → same root cause; speaker rejected Play.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <section id="spotify">
+      <h2>Spotify migration</h2>
+
+      <h3>Wizard sync from CLI</h3>
+      <div class="cmd">
+        <div class="label"><span>any shell</span><button class="copy">Copy</button></div>
+<pre># Start a sync
+curl -sS -X POST http://localhost:3101/api/spotify/migration/sync
+
+# Poll status
+curl -sS http://localhost:3101/api/spotify/migration/sync | python3 -m json.tool
+
+# Snapshot summary
+curl -sS http://localhost:3101/api/spotify/migration/snapshot | python3 -m json.tool
+
+# Playlists (sidebar source)
+curl -sS http://localhost:3101/api/spotify/migration/playlists | python3 -m json.tool</pre>
+      </div>
+
+      <h3>Disconnect &amp; wipe (purges everything Spotify-derived)</h3>
+      <div class="cmd">
+        <div class="label"><span>any shell · destructive</span><button class="copy">Copy</button></div>
+<pre>curl -sS -X DELETE http://localhost:3101/api/spotify | python3 -m json.tool</pre>
+      </div>
+    </section>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <section id="tailscale">
+      <h2>Tailscale HTTPS (for Spotify OAuth)</h2>
+      <p class="lede">Spotify dropped <code class="inline">http://</code> redirect URIs (except loopback) in Feb 2026.
+        Tailscale Serve gives a public-Let's-Encrypt-signed cert for the tailnet hostname, no public exposure.</p>
+
+      <h3>Start (persistent, survives container restarts)</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos shell</span><button class="copy">Copy</button></div>
+<pre>docker exec tailscale tailscale serve --bg --https=443 http://localhost:3101
+docker exec tailscale tailscale serve status</pre>
+      </div>
+
+      <h3>If "foreground listener already exists for port 443"</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos shell</span><button class="copy">Copy</button></div>
+<pre>docker exec tailscale tailscale serve reset
+docker exec tailscale tailscale serve --bg --https=443 http://localhost:3101
+# or restart the container if reset doesn't clear:
+docker restart tailscale &amp;&amp; docker exec tailscale tailscale serve --bg --https=443 http://localhost:3101</pre>
+      </div>
+
+      <h3>Stop</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos shell</span><button class="copy">Copy</button></div>
+<pre>docker exec tailscale tailscale serve --https=443 off
+docker exec tailscale tailscale serve reset    # nukes all serve config</pre>
+      </div>
+
+      <p>Result URL: <code class="inline">https://cosmos.tail138398.ts.net/</code> — only reachable from the tailnet.</p>
+    </section>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <section id="dozzle">
+      <h2>Dozzle (browser log viewer)</h2>
+      <p class="lede">Lightweight web UI for any container's logs on the host. Used to share live logs across debugging.</p>
+
+      <h3>Portainer stack YAML</h3>
+      <div class="cmd">
+        <div class="label"><span>portainer · new stack</span><button class="copy">Copy</button></div>
+<pre>version: "3.8"
+services:
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    restart: unless-stopped
+    environment:
+      - DOZZLE_ADDR=:8181        # change internal port (default 8080 collided)
+      - DOZZLE_LEVEL=info
+      - DOZZLE_NO_ANALYTICS=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "8181:8181"</pre>
+      </div>
+
+      <h3>Find a free port on cosmos</h3>
+      <div class="cmd">
+        <div class="label"><span>cosmos shell</span><button class="copy">Copy</button></div>
+<pre>for p in 8181 8800 8444 7777 9090; do
+  ss -ltn "( sport = :$p )" | tail -n +2 | grep -q . || { echo "FREE: $p"; break; }
+done</pre>
+      </div>
+
+      <p>URLs once running: <code class="inline">http://192.168.74.79:8181/</code> or
+        <code class="inline">http://100.119.120.45:8181/</code>.</p>
+    </section>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <section id="dev">
+      <h2>Local dev server</h2>
+
+      <h3>Start</h3>
+      <div class="cmd">
+        <div class="label"><span>Mac · repo root</span><button class="copy">Copy</button></div>
+<pre>npm run dev
+# Next.js dev on http://localhost:3101  (port hardcoded in package.json)</pre>
+      </div>
+
+      <h3>Kill stuck processes</h3>
+      <div class="cmd">
+        <div class="label"><span>Mac</span><button class="copy">Copy</button></div>
+<pre>lsof -ti :3101 | xargs kill -9 2&gt;/dev/null
+lsof -ti :6329 | xargs kill -9 2&gt;/dev/null    # Sonos discovery socket
+npm run dev</pre>
+      </div>
+
+      <h3>Typecheck / lint without running the server</h3>
+      <div class="cmd">
+        <div class="label"><span>Mac</span><button class="copy">Copy</button></div>
+<pre>npx tsc --noEmit -p .
+npx next lint --file 'src/path/to/file.tsx'</pre>
+      </div>
+    </section>
+
+    <!-- ─────────────────────────────────────────────────────────── -->
+    <section id="release">
+      <h2>Release flow</h2>
+      <p class="lede">Forgejo <code class="inline">development</code> → merge into <code class="inline">UAT</code> →
+        Forgejo Action mirrors to GitHub <code class="inline">main</code> → docker-publish.yml builds
+        <code class="inline">cand0rian/vynl-app:vX.Y.Z</code> + <code class="inline">:latest</code> on Docker Hub + GHCR.</p>
+
+      <h3>Bump + push</h3>
+      <div class="cmd">
+        <div class="label"><span>Mac · repo root</span><button class="copy">Copy</button></div>
+<pre># 1. Edit package.json version manually, then:
+git add package.json &amp;&amp; git commit -m "chore(release): vX.Y.Z — summary"
+git push forgejo development
+
+# 2. Merge into UAT (triggers release workflow)
+git checkout UAT
+git merge --no-ff development -m "chore(uat): release vX.Y.Z — summary"
+git push forgejo UAT
+git checkout development</pre>
+      </div>
+
+      <h3>Watch for build completion</h3>
+      <div class="cmd">
+        <div class="label"><span>Mac</span><button class="copy">Copy</button></div>
+<pre># Replace X.Y.Z with the version you just released
+until tag=$(curl -sS "https://hub.docker.com/v2/repositories/cand0rian/vynl-app/tags/vX.Y.Z/" 2&gt;/dev/null \
+  | python3 -c "import json,sys; print(json.load(sys.stdin).get('name','none'))" 2&gt;/dev/null); [ "$tag" = "vX.Y.Z" ]; do sleep 60; done
+echo "Docker Hub :vX.Y.Z LIVE"</pre>
+      </div>
+
+      <div class="ok">Cosmos pulls <code class="inline">cand0rian/vynl-app:latest</code> by default — Portainer
+        stack "Update" with "Re-pull image" fetches the new build. Pin to <code class="inline">:vX.Y.Z</code>
+        in the stack if you want a specific version.</div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+  document.querySelectorAll('button.copy').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const pre = btn.closest('.cmd').querySelector('pre');
+      const text = pre.innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        const original = btn.innerText;
+        btn.innerText = 'Copied';
+        btn.classList.add('done');
+        setTimeout(() => {
+          btn.innerText = original;
+          btn.classList.remove('done');
+        }, 1200);
+      });
+    });
+  });
+</script>
+</body>
+</html>
