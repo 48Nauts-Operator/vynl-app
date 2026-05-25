@@ -4,6 +4,18 @@ This thread is the rolling feed of project updates. Each release gets a comment 
 
 For the same content in machine-readable form, check the [Releases page](https://github.com/48Nauts-Operator/vynl-app/releases) — that has the auto-generated tag notes from CI.
 
+---
+
+### 📱 Coming soon: a native iOS companion app
+
+Vynl's web UI is great on a laptop. The iOS app is great when you're not.
+
+A native SwiftUI iPhone / iPad app — **SpotVynl** — that connects to your self-hosted Vynl server is in late-stage testing. Browse your library, queue tracks to Sonos, see the 5-Vynl Crown playlist, manage the wishlist, all from a phone. Works over LAN or Tailscale.
+
+No release date yet — drop a 👀 reaction on this thread if you want a notification when the TestFlight beta opens.
+
+---
+
 ### What you'll see here
 
 - ⚡ **What just shipped** — short blurb per release pointing at the highlights (Migration Wizard v2, Sonos URL fix, Docker image now bundles spotdl, etc.)
