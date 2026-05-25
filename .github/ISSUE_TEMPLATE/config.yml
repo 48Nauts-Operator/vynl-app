@@ -1,5 +1,11 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Project documentation
+  - name: 💡 Have a rough idea or want to chat?
+    url: https://github.com/48Nauts-Operator/vynl-app/discussions
+    about: |
+      Open a Discussion for casual ideas, "wouldn't it be cool if..." conversations,
+      questions, and feedback. Use the Issues below for concrete bug reports or
+      well-defined feature requests.
+  - name: 📚 Project documentation
     url: https://github.com/48Nauts-Operator/vynl-app/tree/main/docs
-    about: Browse feature specs and research notes before filing.
+    about: Browse feature specs, the operations cheatsheet, and research notes.
