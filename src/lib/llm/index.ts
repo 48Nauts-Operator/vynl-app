@@ -5,6 +5,7 @@
 import { db } from "@/lib/db";
 import { llmSettings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { getSettingOrEnv } from "@/lib/app-settings";
 
 import { callAnthropic } from "./providers/anthropic";
 import { callOpenAICompatible } from "./providers/openai-compatible";
@@ -81,7 +82,7 @@ export function getActiveSettings(): LLMSettingsResolved {
         provider: (row.provider as LLMProvider) ?? "anthropic",
         model: row.model || "claude-sonnet-4-7",
         endpoint: row.endpoint || DEFAULT_ENDPOINTS[(row.provider as LLMProvider) ?? "anthropic"],
-        apiKey: row.apiKey || process.env.ANTHROPIC_API_KEY || null,
+        apiKey: row.apiKey || getSettingOrEnv("anthropic_api_key", "ANTHROPIC_API_KEY"),
         maxTokens: row.maxTokens || 4000,
       };
     }
@@ -92,7 +93,7 @@ export function getActiveSettings(): LLMSettingsResolved {
     provider: "anthropic",
     model: "claude-sonnet-4-7",
     endpoint: DEFAULT_ENDPOINTS.anthropic,
-    apiKey: process.env.ANTHROPIC_API_KEY || null,
+    apiKey: getSettingOrEnv("anthropic_api_key", "ANTHROPIC_API_KEY"),
     maxTokens: 4000,
   };
 }

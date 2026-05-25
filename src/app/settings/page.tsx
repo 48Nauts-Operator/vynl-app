@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LLMSettingsPanel } from "@/components/settings/LLMSettingsPanel";
 import { FlightCheckPanel } from "@/components/settings/FlightCheckPanel";
@@ -101,13 +101,82 @@ export default function SettingsPage() {
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => setHydrated(true), []);
 
+  // Load DB-backed API keys (and env-fallback indicators) on mount.
+  useEffect(() => {
+    loadApiKeys();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [musicPath, setMusicPath] = useState("");
   const [vynlHost, setVynlHost] = useState("http://localhost:3000");
-  const [anthropicKey, setAnthropicKey] = useState("");
-  const [replicateKey, setReplicateKey] = useState("");
-  const [spotifyId, setSpotifyId] = useState("");
-  const [spotifySecret, setSpotifySecret] = useState("");
-  const [youtubeKey, setYoutubeKey] = useState("");
+  // (deprecated state for old API key inputs has been removed — see new
+  //  apiKeys / apiKeyDrafts state below, which is server-backed.)
+
+  // Server-backed API Keys: load on mount via GET /api/settings/keys,
+  // save individually via PUT, clear back to env via DELETE.
+  type ApiKeyName =
+    | "anthropic"
+    | "replicate"
+    | "acoustid"
+    | "spotifyClientId"
+    | "spotifyClientSecret"
+    | "spotifyRedirectUri"
+    | "youtube";
+  interface ApiKeyMeta {
+    source: "db" | "env" | "none";
+    value: string | null;
+    label: string;
+    secret: boolean;
+  }
+  const [apiKeys, setApiKeys] = useState<Record<string, ApiKeyMeta>>({});
+  const [apiKeyDrafts, setApiKeyDrafts] = useState<Record<string, string>>({});
+  const [apiKeySavedFlags, setApiKeySavedFlags] = useState<Record<string, boolean>>({});
+
+  const loadApiKeys = useCallback(async () => {
+    try {
+      const res = await fetch("/api/settings/keys");
+      const data = await res.json();
+      setApiKeys(data.keys || {});
+      // Seed drafts with the masked/plain value so the input reflects what's stored.
+      const drafts: Record<string, string> = {};
+      for (const [name, meta] of Object.entries(data.keys || {}) as [string, ApiKeyMeta][]) {
+        drafts[name] = meta.value ?? "";
+      }
+      setApiKeyDrafts(drafts);
+    } catch {
+      // Leave empty on failure; user can still type.
+    }
+  }, []);
+
+  const saveApiKey = async (name: ApiKeyName) => {
+    const value = apiKeyDrafts[name] ?? "";
+    // Refuse to save a masked value (round-trip of a stale GET would wipe the real one).
+    if (value.includes("●")) return;
+    try {
+      await fetch("/api/settings/keys", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: name, value }),
+      });
+      setApiKeySavedFlags((prev) => ({ ...prev, [name]: true }));
+      setTimeout(
+        () => setApiKeySavedFlags((prev) => ({ ...prev, [name]: false })),
+        2000
+      );
+      await loadApiKeys();
+    } catch {
+      // Silent — the lack of "Saved" checkmark surfaces failure.
+    }
+  };
+
+  const clearApiKey = async (name: ApiKeyName) => {
+    try {
+      await fetch(`/api/settings/keys?key=${encodeURIComponent(name)}`, {
+        method: "DELETE",
+      });
+      await loadApiKeys();
+    } catch {}
+  };
   const [saved, setSaved] = useState(false);
   const [coverStatus, setCoverStatus] = useState<string | null>(null);
   const [coverLoading, setCoverLoading] = useState(false);
@@ -1770,101 +1839,118 @@ export default function SettingsPage() {
         </CardHeader>
         {isOpen("apikeys") && (
         <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label className="flex items-center gap-2">
-              Anthropic API Key
-              <Badge variant="outline" className="text-xs">
-                Required for AI
-              </Badge>
-            </Label>
-            <Input
-              type="password"
-              value={anthropicKey}
-              onChange={(e) => setAnthropicKey(e.target.value)}
-              placeholder="sk-ant-..."
-            />
-          </div>
-
-          <Separator />
-
-          <div className="space-y-2">
-            <Label className="flex items-center gap-2">
-              Replicate API Token
-              <Badge variant="outline" className="text-xs">
-                Cover Art
-              </Badge>
-            </Label>
-            <Input
-              type="password"
-              value={replicateKey}
-              onChange={(e) => setReplicateKey(e.target.value)}
-              placeholder="r8_..."
-            />
-          </div>
-
-          <Separator />
-
-          <div className="space-y-2">
-            <Label className="flex items-center gap-2">
-              AcoustID API Key
-              <Badge variant="outline" className="text-xs">
-                Audio Identify
-              </Badge>
-            </Label>
-            <Input
-              type="password"
-              value={hydrated ? (ui?.acoustIdApiKey ?? "") : ""}
-              onChange={(e) => setUIPreference("acoustIdApiKey", e.target.value)}
-              placeholder="Free key from acoustid.org/api-key"
-            />
-            <p className="text-xs text-muted-foreground">
-              Required only for the &quot;Identify (audio)&quot; track menu action.
-              Free at <a href="https://acoustid.org/api-key" target="_blank" rel="noreferrer" className="underline">acoustid.org/api-key</a> — no card,
-              no signup wall, 3 req/sec rate limit. The &quot;Look up metadata&quot;
-              action (MusicBrainz name search) works without any key.
-            </p>
-          </div>
-
-          <Separator />
-
-          <div className="space-y-2">
-            <Label>Spotify Client ID</Label>
-            <Input
-              value={spotifyId}
-              onChange={(e) => setSpotifyId(e.target.value)}
-              placeholder="Client ID"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Spotify Client Secret</Label>
-            <Input
-              type="password"
-              value={spotifySecret}
-              onChange={(e) => setSpotifySecret(e.target.value)}
-              placeholder="Client Secret"
-            />
-          </div>
-
-          <Separator />
-
-          <div className="space-y-2">
-            <Label className="flex items-center gap-2">
-              YouTube API Key
-              <Badge variant="outline" className="text-xs">
-                Optional
-              </Badge>
-            </Label>
-            <Input
-              type="password"
-              value={youtubeKey}
-              onChange={(e) => setYoutubeKey(e.target.value)}
-              placeholder="AIza..."
-            />
-          </div>
+          {(
+            [
+              { name: "anthropic", badge: "Required for AI", placeholder: "sk-ant-..." },
+              { name: "replicate", badge: "Cover Art", placeholder: "r8_..." },
+              {
+                name: "acoustid",
+                badge: "Audio Identify",
+                placeholder: "Free key from acoustid.org/api-key",
+                help: (
+                  <>
+                    Required only for the &ldquo;Identify (audio)&rdquo; track menu action.
+                    Free at{" "}
+                    <a
+                      href="https://acoustid.org/api-key"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline"
+                    >
+                      acoustid.org/api-key
+                    </a>{" "}
+                    — no card, no signup wall, 3 req/sec rate limit. The &ldquo;Look up
+                    metadata&rdquo; action (MusicBrainz name search) works without any key.
+                  </>
+                ),
+              },
+              { name: "spotifyClientId", badge: "Spotify", placeholder: "Client ID" },
+              { name: "spotifyClientSecret", badge: "Spotify", placeholder: "Client Secret" },
+              {
+                name: "spotifyRedirectUri",
+                badge: "Spotify",
+                placeholder: `http://${typeof window !== "undefined" ? window.location.host : "192.168.1.1:3101"}/api/spotify/callback`,
+                help: (
+                  <>
+                    Must EXACTLY match one of the Redirect URIs registered on the Spotify
+                    developer dashboard for this app.
+                  </>
+                ),
+              },
+              { name: "youtube", badge: "Optional", placeholder: "AIza..." },
+            ] as const
+          ).map((spec, i, arr) => {
+            const meta = apiKeys[spec.name];
+            const draft = apiKeyDrafts[spec.name] ?? "";
+            const isMasked = draft.includes("●");
+            const savedFlag = !!apiKeySavedFlags[spec.name];
+            return (
+              <React.Fragment key={spec.name}>
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-2">
+                    {meta?.label ?? spec.name}
+                    <Badge variant="outline" className="text-xs">
+                      {spec.badge}
+                    </Badge>
+                    {meta?.source === "env" && (
+                      <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-400/30">
+                        from env
+                      </Badge>
+                    )}
+                    {meta?.source === "db" && (
+                      <Badge variant="outline" className="text-[10px] text-green-400 border-green-400/30">
+                        saved
+                      </Badge>
+                    )}
+                  </Label>
+                  <div className="flex gap-2">
+                    <Input
+                      type={meta?.secret ? "password" : "text"}
+                      value={draft}
+                      onChange={(e) =>
+                        setApiKeyDrafts((prev) => ({ ...prev, [spec.name]: e.target.value }))
+                      }
+                      placeholder={spec.placeholder}
+                      className="flex-1"
+                    />
+                    <Button
+                      variant="outline"
+                      onClick={() => saveApiKey(spec.name)}
+                      disabled={isMasked || draft.length === 0}
+                    >
+                      {savedFlag ? (
+                        <>
+                          <CheckCircle className="h-4 w-4 mr-2 text-green-400" />
+                          Saved
+                        </>
+                      ) : (
+                        "Save"
+                      )}
+                    </Button>
+                    {meta?.source === "db" && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => clearApiKey(spec.name)}
+                        title="Clear stored value (env fallback applies if set)"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                  {"help" in spec && spec.help && (
+                    <p className="text-xs text-muted-foreground">{spec.help}</p>
+                  )}
+                </div>
+                {i < arr.length - 1 && <Separator />}
+              </React.Fragment>
+            );
+          })}
 
           <p className="text-xs text-muted-foreground">
-            API keys are stored in .env.local. Update the file and restart the
-            server for changes to take effect.
+            Stored securely on the server in app_settings. Saved values take effect
+            immediately — no restart required. Env vars are used as a fallback when
+            no value is saved here.
           </p>
         </CardContent>
         )}

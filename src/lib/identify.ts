@@ -27,13 +27,17 @@ export interface IdentifyMatch {
   source: "musicbrainz-name" | "acoustid-audio";
 }
 
+import { getSettingOrEnv } from "@/lib/app-settings";
+
 const UA = "Vynl/0.6.x (https://github.com/48Nauts-Operator/vynl-app)";
 const MB_BASE = "https://musicbrainz.org/ws/2";
 const ACOUSTID_BASE = "https://api.acoustid.org/v2";
 
-/** Free Vynl-owned AcoustID app key, fallback when the user hasn't
- *  configured one. Rate-limited to 3 req/sec per app. */
-const DEFAULT_ACOUSTID_KEY = process.env.ACOUSTID_API_KEY || "";
+/** Read at request time so a freshly-saved Settings key takes effect
+ *  without a server restart. */
+function defaultAcoustIdKey(): string {
+  return getSettingOrEnv("acoustid_api_key", "ACOUSTID_API_KEY") || "";
+}
 
 /**
  * Search MusicBrainz by title + artist. Returns the top 5 candidate
@@ -122,7 +126,7 @@ export async function identifyByAudio(
   filePath: string,
   apiKey?: string
 ): Promise<IdentifyMatch[]> {
-  const key = apiKey || DEFAULT_ACOUSTID_KEY;
+  const key = apiKey || defaultAcoustIdKey();
   if (!key) {
     throw new Error(
       "AcoustID API key not configured. Settings → AcoustID API Key, or set ACOUSTID_API_KEY env var."

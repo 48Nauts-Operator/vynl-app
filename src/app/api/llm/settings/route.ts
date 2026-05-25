@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { llmSettings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { getSettingOrEnv } from "@/lib/app-settings";
 import {
   DEFAULT_ENDPOINTS,
   getActiveSettings,
@@ -49,7 +50,11 @@ export async function POST(request: NextRequest) {
       provider,
       model,
       endpoint: endpoint || DEFAULT_ENDPOINTS[provider as LLMProvider],
-      apiKey: apiKey || (provider === "anthropic" ? process.env.ANTHROPIC_API_KEY ?? null : null),
+      apiKey:
+        apiKey ||
+        (provider === "anthropic"
+          ? getSettingOrEnv("anthropic_api_key", "ANTHROPIC_API_KEY")
+          : null),
       maxTokens: maxTokens || 4000,
     };
     const result = await testConnection(proposed);

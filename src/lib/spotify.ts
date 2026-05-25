@@ -7,6 +7,7 @@
 import { db } from "@/lib/db";
 import { spotifyAuth } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { getSettingOrEnv } from "@/lib/app-settings";
 
 const SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize";
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
@@ -21,19 +22,22 @@ const SCOPES = [
 ].join(" ");
 
 function getClientId(): string {
-  const id = process.env.SPOTIFY_CLIENT_ID;
+  const id = getSettingOrEnv("spotify_client_id", "SPOTIFY_CLIENT_ID");
   if (!id) throw new Error("SPOTIFY_CLIENT_ID not set");
   return id;
 }
 
 function getClientSecret(): string {
-  const secret = process.env.SPOTIFY_CLIENT_SECRET;
+  const secret = getSettingOrEnv("spotify_client_secret", "SPOTIFY_CLIENT_SECRET");
   if (!secret) throw new Error("SPOTIFY_CLIENT_SECRET not set");
   return secret;
 }
 
 function getRedirectUri(): string {
-  return process.env.SPOTIFY_REDIRECT_URI || `http://localhost:3101/api/spotify/callback`;
+  return (
+    getSettingOrEnv("spotify_redirect_uri", "SPOTIFY_REDIRECT_URI") ||
+    `http://localhost:3101/api/spotify/callback`
+  );
 }
 
 /** Build the Spotify authorize URL for the OAuth redirect */
@@ -312,8 +316,8 @@ export interface SpotifySearchResult {
 let clientCredentialsToken: { accessToken: string; expiresAt: number } | null = null;
 
 async function getClientCredentialsToken(): Promise<string | null> {
-  const clientId = process.env.SPOTIFY_CLIENT_ID;
-  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+  const clientId = getSettingOrEnv("spotify_client_id", "SPOTIFY_CLIENT_ID");
+  const clientSecret = getSettingOrEnv("spotify_client_secret", "SPOTIFY_CLIENT_SECRET");
   if (!clientId || !clientSecret) return null;
 
   if (clientCredentialsToken && Date.now() < clientCredentialsToken.expiresAt) {

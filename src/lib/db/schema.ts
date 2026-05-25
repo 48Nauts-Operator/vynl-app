@@ -483,3 +483,17 @@ export const beetsaiReview = sqliteTable("beetsai_review", {
 
 export type BeetsAIAction = typeof beetsaiActions.$inferSelect;
 export type BeetsAIReview = typeof beetsaiReview.$inferSelect;
+
+// ---------- App settings (runtime-editable key/value config) ----------
+//
+// Single-table runtime config store. Used for API keys + integration
+// credentials so they can be entered through Settings without editing
+// .env.local + restarting. Read order in `src/lib/app-settings.ts` is
+// DB first, env var second — env-set values remain backward compatible.
+export const appSettings = sqliteTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: text("updated_at").default(sql`(datetime('now'))`),
+});
+
+export type AppSetting = typeof appSettings.$inferSelect;

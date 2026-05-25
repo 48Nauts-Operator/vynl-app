@@ -1,4 +1,5 @@
 import { generateText } from "@/lib/llm";
+import { getSettingOrEnv } from "@/lib/app-settings";
 
 interface FeedbackItem {
   title: string;
@@ -190,7 +191,7 @@ The prompt should describe a visually striking, abstract or artistic image suita
 }
 
 export async function generateCoverArt(prompt: string): Promise<string | null> {
-  const token = process.env.REPLICATE_API_TOKEN;
+  const token = getSettingOrEnv("replicate_api_token", "REPLICATE_API_TOKEN");
   if (!token) return null;
 
   try {

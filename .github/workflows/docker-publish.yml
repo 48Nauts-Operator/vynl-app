@@ -52,6 +52,15 @@ jobs:
           username: ${{ env.DOCKERHUB_USERNAME_LC }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # Read version from package.json so the version-tag is emitted on
+      # every push, not only on tag-pushes. type=semver alone only fires
+      # when the workflow is triggered by refs/tags/v* — but our release
+      # flow pushes to main (branch-push) and the v* tag is created
+      # afterward, so type=semver historically never resolved.
+      - name: Read package.json version
+        id: pkgver
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -64,6 +73,7 @@ jobs:
             ${{ env.DOCKERHUB_IMAGE }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=v${{ steps.pkgver.outputs.version }}
             type=sha,prefix=
             type=semver,pattern={{version}}
 

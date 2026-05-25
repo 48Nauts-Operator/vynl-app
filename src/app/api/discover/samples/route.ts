@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { tracks } from "@/lib/db/schema";
 import { sql, count } from "drizzle-orm";
 import * as sonos from "@/lib/sonos";
+import { getSettingOrEnv } from "@/lib/app-settings";
 
 interface SpotifySample {
   title: string;
@@ -172,12 +173,14 @@ export async function GET(request: NextRequest) {
     queries.push("top hits", "classic songs", "popular music");
   }
 
-  // Check if Spotify credentials are configured
-  if (!process.env.SPOTIFY_CLIENT_ID || !process.env.SPOTIFY_CLIENT_SECRET) {
+  // Check if Spotify credentials are configured (DB-stored or env fallback).
+  const cid = getSettingOrEnv("spotify_client_id", "SPOTIFY_CLIENT_ID");
+  const csec = getSettingOrEnv("spotify_client_secret", "SPOTIFY_CLIENT_SECRET");
+  if (!cid || !csec) {
     return NextResponse.json({
       tracks: [],
       source: "none",
-      error: "No local tracks and SPOTIFY_CLIENT_ID/SPOTIFY_CLIENT_SECRET not configured in .env.local",
+      error: "No local tracks and Spotify credentials not configured. Add them in Settings → API Keys.",
     });
   }
 

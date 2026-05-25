@@ -10,6 +10,7 @@ import path from "path";
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
 import { getActiveSettings, testConnection } from "@/lib/llm";
+import { getSettingOrEnv } from "@/lib/app-settings";
 
 const execFileAsync = promisify(execFile);
 
@@ -259,8 +260,8 @@ async function checkLLM(): Promise<Check> {
 }
 
 function checkSpotify(): Check {
-  const id = process.env.SPOTIFY_CLIENT_ID;
-  const secret = process.env.SPOTIFY_CLIENT_SECRET;
+  const id = getSettingOrEnv("spotify_client_id", "SPOTIFY_CLIENT_ID");
+  const secret = getSettingOrEnv("spotify_client_secret", "SPOTIFY_CLIENT_SECRET");
   if (!id || !secret) {
     return {
       id: "spotify",
@@ -268,7 +269,7 @@ function checkSpotify(): Check {
       label: "Spotify credentials",
       status: "info",
       message: "Not configured (optional)",
-      hint: "Set SPOTIFY_CLIENT_ID + SPOTIFY_CLIENT_SECRET in env to enable Spotify search and library import.",
+      hint: "Add Spotify Client ID + Secret in Settings → API Keys to enable Spotify import.",
     };
   }
   return {
