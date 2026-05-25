@@ -39,8 +39,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libchromaprint-tools \
     && python3 -m venv /opt/vynl-venv \
-    && /opt/vynl-venv/bin/pip install --no-cache-dir beets requests pylast pillow musicbrainzngs pyacoustid \
+    && /opt/vynl-venv/bin/pip install --no-cache-dir \
+       beets requests pylast pillow musicbrainzngs pyacoustid \
+       spotdl yt-dlp \
     && ln -s /opt/vynl-venv/bin/beet /usr/local/bin/beet \
+    && ln -s /opt/vynl-venv/bin/spotdl /usr/local/bin/spotdl \
+    && ln -s /opt/vynl-venv/bin/yt-dlp /usr/local/bin/yt-dlp \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
