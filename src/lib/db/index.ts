@@ -420,4 +420,17 @@ try { sqlite.prepare(`ALTER TABLE tracks ADD COLUMN album_type TEXT`).run(); } c
 // not just for downloads the user clicked themselves.
 try { sqlite.prepare(`ALTER TABLE podcast_episodes ADD COLUMN downloading_at TEXT`).run(); } catch { /* already exists */ }
 
+// Runtime-editable app settings (API keys + integration credentials).
+// Source of truth for values entered through Settings → API Keys.
+// Read order in src/lib/app-settings.ts: DB first, env var fallback.
+try {
+  sqlite.prepare(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `).run();
+} catch { /* already exists */ }
+
 export { schema };
