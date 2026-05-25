@@ -217,10 +217,40 @@ export default function MigrationPage() {
     }, 2000);
   }, [loadSnapshot, loadPlaylists]);
 
-  // First-time mount: load snapshot, then auto-sync if none.
+  // First-time mount: check for an in-flight download FIRST (so navigating
+  // away mid-download and coming back restores the live progress view).
+  // Then check the snapshot + auto-sync if none.
   useEffect(() => {
     (async () => {
       try {
+        // If a download job is running OR was running and the user hasn't
+        // dismissed its result, snap straight to the downloading view.
+        const dlRes = await fetch("/api/spotify/migration/download");
+        const dlData = (await dlRes.json()) as DownloadJob;
+        if (dlData.status === "running" || dlData.status === "complete" || dlData.status === "cancelled") {
+          if (dlData.total > 0) {
+            setDownloadJob(dlData);
+            setView("downloading");
+            if (dlData.status === "running") {
+              if (dlPollRef.current) clearInterval(dlPollRef.current);
+              dlPollRef.current = setInterval(async () => {
+                try {
+                  const r = await fetch("/api/spotify/migration/download");
+                  const j = (await r.json()) as DownloadJob;
+                  setDownloadJob(j);
+                  if (j.status === "complete" || j.status === "cancelled") {
+                    if (dlPollRef.current) clearInterval(dlPollRef.current);
+                    dlPollRef.current = null;
+                  }
+                } catch {
+                  // ignore
+                }
+              }, 1500);
+            }
+            return;
+          }
+        }
+
         const snap = await loadSnapshot();
         if (!snap) {
           await startSync();
@@ -236,6 +266,7 @@ export default function MigrationPage() {
     })();
     return () => {
       if (syncPollRef.current) clearInterval(syncPollRef.current);
+      if (dlPollRef.current) clearInterval(dlPollRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
