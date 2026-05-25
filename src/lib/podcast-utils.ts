@@ -59,7 +59,10 @@ export async function parseFeed(feedUrl: string): Promise<ParsedPodcast> {
       title: item.title || "Untitled Episode",
       description:
         item.itunesSummary || item.contentSnippet || item.content || null,
-      pubDate: item.pubDate || item.isoDate || null,
+      // Prefer isoDate (ISO 8601, lexicographically sortable) over the raw
+      // RFC 2822 pubDate. The raw form ("Wed, 21 May 2026 ...") sorts by
+      // day-name first, which scrambles episodes in date order.
+      pubDate: item.isoDate || item.pubDate || null,
       duration: parseDuration(item.itunesDuration),
       audioUrl: item.enclosure!.url,
       coverUrl: item.itunesImage?.href || null,
@@ -148,6 +151,10 @@ export function getEpisodeFilePath(
  * Idempotent: returns early if `isDownloaded` is already true.
  * Throws on network / fs errors so the caller can decide whether to surface them
  * (foreground POST) or swallow them (background auto-download after subscribe).
+ *
+ * Sets `downloadingAt` for the duration of the download so the UI can show a
+ * spinner for any episode currently being fetched — regardless of whether the
+ * user clicked Download or it was kicked off by subscribe's auto-download.
  */
 export async function startEpisodeDownload(episodeId: number): Promise<void> {
   const episode = db
@@ -159,14 +166,34 @@ export async function startEpisodeDownload(episodeId: number): Promise<void> {
   if (!episode) throw new Error(`Episode ${episodeId} not found`);
   if (episode.isDownloaded) return;
 
-  const destPath = getEpisodeFilePath(episode.podcastId, episode.id, episode.audioUrl);
-  await downloadFile(episode.audioUrl, destPath);
-
-  const stat = fs.statSync(destPath);
+  // Mark in-flight before any await so concurrent callers / page polls see it.
   db.update(podcastEpisodes)
-    .set({ localPath: destPath, isDownloaded: true, fileSize: stat.size })
+    .set({ downloadingAt: new Date().toISOString() })
     .where(eq(podcastEpisodes.id, episode.id))
     .run();
+
+  try {
+    const destPath = getEpisodeFilePath(episode.podcastId, episode.id, episode.audioUrl);
+    await downloadFile(episode.audioUrl, destPath);
+
+    const stat = fs.statSync(destPath);
+    db.update(podcastEpisodes)
+      .set({
+        localPath: destPath,
+        isDownloaded: true,
+        fileSize: stat.size,
+        downloadingAt: null,
+      })
+      .where(eq(podcastEpisodes.id, episode.id))
+      .run();
+  } catch (err) {
+    // Clear in-flight marker so the UI doesn't spin forever on failure.
+    db.update(podcastEpisodes)
+      .set({ downloadingAt: null })
+      .where(eq(podcastEpisodes.id, episode.id))
+      .run();
+    throw err;
+  }
 }
 
 export function formatPodcastDuration(seconds: number | null): string {
