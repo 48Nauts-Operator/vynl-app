@@ -74,24 +74,17 @@ export function useAudioPlayer() {
       audio.pause();
       audio.removeAttribute("src");
 
-      // Send to Sonos via API
-      const vynlHost = process.env.NEXT_PUBLIC_VYNL_HOST || window.location.origin;
-
       if (currentTrack.filePath) {
-        // Encode path segments for Sonos (spaces/special chars must be percent-encoded)
+        const isLossless = /\.(flac|wav|aiff|alac)$/i.test(currentTrack.filePath);
+        // Path-encode for the warm-up fetch (still issued from the browser).
         const encodedPath = currentTrack.filePath
           .split("/")
           .map((seg) => encodeURIComponent(seg))
           .join("/");
-        const isLossless = /\.(flac|wav|aiff|alac)$/i.test(currentTrack.filePath);
 
-        // For lossless: swap extension to .mp3 so Sonos sets protocolInfo=audio/mpeg
-        // Server resolves .mp3 back to .flac and serves transcoded MP3
-        const sonosEncodedPath = isLossless
-          ? encodedPath.replace(/\.(flac|wav|aiff|alac)$/i, ".mp3")
-          : encodedPath;
-        const sonosParam = isLossless ? "?sonos=1" : "";
-
+        // URL composition for the speaker is done SERVER-side via play-file
+        // so the URL always reflects the LAN/Tailscale base the request
+        // came in on — never leaks a host the speaker can't fetch.
         const sendToSonos = () => {
           sonosPlayUriSent.current = true;
           fetch("/api/sonos/control", {
@@ -99,8 +92,9 @@ export function useAudioPlayer() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               speaker: sonosSpeaker,
-              action: "play-uri",
-              uri: `${vynlHost}/api/audio${sonosEncodedPath}${sonosParam}`,
+              action: "play-file",
+              filePath: currentTrack.filePath,
+              isLossless,
             }),
           }).catch(console.error);
         };
