@@ -190,6 +190,10 @@ export const podcastEpisodes = sqliteTable("podcast_episodes", {
   listenedAt: text("listened_at"),
   playPosition: real("play_position").default(0),
   isDownloaded: integer("is_downloaded", { mode: "boolean" }).default(false),
+  // ISO timestamp set when a download is in-flight; cleared on finish.
+  // Lets the UI show a spinner regardless of whether the download was
+  // user-initiated or kicked off by the subscribe auto-download path.
+  downloadingAt: text("downloading_at"),
   addedAt: text("added_at").default(sql`(datetime('now'))`),
 });
 

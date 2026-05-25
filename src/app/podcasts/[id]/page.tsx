@@ -19,6 +19,7 @@ import {
   Podcast,
   Clock,
   ArrowLeft,
+  ArrowDownWideNarrow,
 } from "lucide-react";
 import { usePlayerStore, type Track } from "@/store/player";
 import { formatPodcastDuration } from "@/lib/utils";
@@ -44,6 +45,30 @@ interface Episode {
   isDownloaded: boolean;
   playPosition: number | null;
   coverPath: string | null;
+  /** ISO timestamp while a download is in flight; null otherwise. */
+  downloadingAt: string | null;
+}
+
+type SortMode = "newest" | "oldest" | "title";
+
+function sortEpisodes(eps: Episode[], mode: SortMode): Episode[] {
+  const arr = [...eps];
+  switch (mode) {
+    case "newest":
+      return arr.sort((a, b) => parseTs(b.pubDate) - parseTs(a.pubDate));
+    case "oldest":
+      return arr.sort((a, b) => parseTs(a.pubDate) - parseTs(b.pubDate));
+    case "title":
+      return arr.sort((a, b) => a.title.localeCompare(b.title));
+  }
+}
+
+// Parse ISO or RFC 2822 pubDate to a comparable number.
+// NaN (unknown date) sinks to the bottom of "newest" / top of "oldest".
+function parseTs(s: string | null): number {
+  if (!s) return 0;
+  const t = Date.parse(s);
+  return Number.isNaN(t) ? 0 : t;
 }
 
 function episodeToTrack(ep: Episode, podcast: PodcastInfo): Track {
@@ -69,7 +94,11 @@ export default function PodcastDetailPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
+  const [sortMode, setSortMode] = useState<SortMode>("newest");
   const { setQueue } = usePlayerStore();
+
+  const sortedEpisodes = sortEpisodes(episodes, sortMode);
+  const anyInFlight = episodes.some((ep) => ep.downloadingAt && !ep.isDownloaded);
 
   const fetchData = useCallback(async () => {
     try {
@@ -87,6 +116,16 @@ export default function PodcastDetailPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Re-poll while any episode is downloading (background subscribe auto-
+  // downloads or manual clicks). Stops as soon as nothing's in flight.
+  useEffect(() => {
+    if (!anyInFlight) return;
+    const t = setInterval(() => {
+      fetchData();
+    }, 3000);
+    return () => clearInterval(t);
+  }, [anyInFlight, fetchData]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -220,71 +259,92 @@ export default function PodcastDetailPage() {
 
       {/* Episodes */}
       <div>
-        <h2 className="text-xl font-semibold mb-4">Episodes</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-semibold">Episodes</h2>
+          <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <ArrowDownWideNarrow className="h-4 w-4" />
+            <select
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as SortMode)}
+              className="rounded-md border border-input bg-background px-2 py-1 text-sm"
+              aria-label="Sort episodes"
+            >
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="title">Title (A–Z)</option>
+            </select>
+          </label>
+        </div>
         <Card>
           <CardContent className="p-0 divide-y divide-border">
-            {episodes.map((ep, index) => (
-              <div
-                key={ep.id}
-                className="flex items-center gap-4 px-4 py-3 hover:bg-secondary/30 transition-colors group"
-              >
-                {/* Play button */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="shrink-0 h-10 w-10 rounded-full"
-                  onClick={() => handlePlayEpisode(ep, index)}
+            {sortedEpisodes.map((ep, index) => {
+              const isInFlight = !!ep.downloadingAt && !ep.isDownloaded;
+              return (
+                <div
+                  key={ep.id}
+                  className="flex items-center gap-4 px-4 py-3 hover:bg-secondary/30 transition-colors group"
                 >
-                  <Play className="h-4 w-4" />
-                </Button>
-
-                {/* Title + date */}
-                <div className="flex-1 min-w-0">
-                  <Link
-                    href={`/podcasts/${id}/episodes/${ep.id}`}
-                    className="text-sm font-medium hover:underline truncate block"
+                  {/* Play button */}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="shrink-0 h-10 w-10 rounded-full"
+                    onClick={() => handlePlayEpisode(ep, index)}
                   >
-                    {ep.title}
-                  </Link>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {ep.pubDate
-                      ? new Date(ep.pubDate).toLocaleDateString("en-US", {
-                          year: "numeric",
-                          month: "short",
-                          day: "numeric",
-                        })
-                      : "Unknown date"}
-                  </p>
-                </div>
+                    <Play className="h-4 w-4" />
+                  </Button>
 
-                {/* Duration */}
-                <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
-                  <Clock className="h-3 w-3" />
-                  {formatPodcastDuration(ep.duration)}
-                </div>
-
-                {/* Download status */}
-                <div className="shrink-0">
-                  {ep.isDownloaded ? (
-                    <Badge variant="secondary" className="text-xs">
-                      <CheckCircle className="h-3 w-3 mr-1" />
-                      Downloaded
-                    </Badge>
-                  ) : downloadingId === ep.id ? (
-                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={() => handleDownload(ep)}
+                  {/* Title + date */}
+                  <div className="flex-1 min-w-0">
+                    <Link
+                      href={`/podcasts/${id}/episodes/${ep.id}`}
+                      className="text-sm font-medium hover:underline truncate block"
                     >
-                      <Download className="h-4 w-4" />
-                    </Button>
-                  )}
+                      {ep.title}
+                    </Link>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {ep.pubDate
+                        ? new Date(ep.pubDate).toLocaleDateString("en-US", {
+                            year: "numeric",
+                            month: "short",
+                            day: "numeric",
+                          })
+                        : "Unknown date"}
+                    </p>
+                  </div>
+
+                  {/* Duration */}
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
+                    <Clock className="h-3 w-3" />
+                    {formatPodcastDuration(ep.duration)}
+                  </div>
+
+                  {/* Download status */}
+                  <div className="shrink-0">
+                    {ep.isDownloaded ? (
+                      <Badge variant="secondary" className="text-xs">
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                        Downloaded
+                      </Badge>
+                    ) : isInFlight || downloadingId === ep.id ? (
+                      <Badge variant="outline" className="text-xs">
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        Downloading
+                      </Badge>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={() => handleDownload(ep)}
+                      >
+                        <Download className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </CardContent>
         </Card>
       </div>

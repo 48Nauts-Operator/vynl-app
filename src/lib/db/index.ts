@@ -414,4 +414,10 @@ try { sqlite.prepare(`ALTER TABLE playlists ADD COLUMN section TEXT`).run(); } c
 // classified correctly regardless of how many tracks were imported.
 try { sqlite.prepare(`ALTER TABLE tracks ADD COLUMN album_type TEXT`).run(); } catch { /* already exists */ }
 
+// Per-episode "download in progress" timestamp. Set when a download
+// starts, cleared on success/failure. Lets the UI show a spinner for
+// background auto-downloads (kicked off by subscribe with autoDownloadLatest>0),
+// not just for downloads the user clicked themselves.
+try { sqlite.prepare(`ALTER TABLE podcast_episodes ADD COLUMN downloading_at TEXT`).run(); } catch { /* already exists */ }
+
 export { schema };
