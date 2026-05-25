@@ -126,6 +126,7 @@ export default function MigrationPage() {
   const [sort, setSort] = useState<SortMode>("artist");
   const [dedupe, setDedupe] = useState(false);
   const [search, setSearch] = useState("");
+  const [hideMatched, setHideMatched] = useState(false);
   const [selectedTrackIds, setSelectedTrackIds] = useState<Set<number>>(new Set());
 
   const [review, setReview] = useState<{
@@ -163,7 +164,10 @@ export default function MigrationPage() {
       if (selectedPlaylistId !== "all") params.set("playlistId", selectedPlaylistId);
       params.set("sort", sort);
       if (dedupe) params.set("dedupe", "1");
-      params.set("limit", "2000");
+      // Server caps at 5000 per page; ask for the max so 5000+ track
+      // libraries don't silently lose rows past the cap. Real fix for
+      // larger libraries is virtualisation — tracked as #83.
+      params.set("limit", "5000");
       const res = await fetch(`/api/spotify/migration/tracks?${params.toString()}`);
       const data = await res.json();
       setTracks(data.tracks || []);
@@ -293,15 +297,19 @@ export default function MigrationPage() {
   };
 
   const filteredTracks = useMemo(() => {
-    if (!search.trim()) return tracks;
+    let result = tracks;
+    if (hideMatched) {
+      result = result.filter((t) => !t.isMatched);
+    }
+    if (!search.trim()) return result;
     const needle = search.toLowerCase();
-    return tracks.filter(
+    return result.filter(
       (t) =>
         t.title.toLowerCase().includes(needle) ||
         t.artist.toLowerCase().includes(needle) ||
         (t.album || "").toLowerCase().includes(needle)
     );
-  }, [tracks, search]);
+  }, [tracks, search, hideMatched]);
 
   const toggleTrack = (id: number) => {
     setSelectedTrackIds((prev) => {
@@ -430,7 +438,30 @@ export default function MigrationPage() {
     } catch {}
   };
 
-  const finishDownload = () => {
+  const mirrorPlaylist = async (spotifyPlaylistId: number | "liked", playlistName: string) => {
+    try {
+      const res = await fetch("/api/spotify/migration/create-playlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spotifyPlaylistId, name: playlistName }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setBanner({ kind: "err", text: data?.error || "Failed to create playlist" });
+        return;
+      }
+      setBanner({
+        kind: "ok",
+        text: `Created "${data.name}" — ${data.addedCount} tracks in your library${
+          data.missing > 0 ? ` (${data.missing} still missing — download via wizard first)` : ""
+        }`,
+      });
+    } catch (err) {
+      setBanner({ kind: "err", text: String(err) });
+    }
+  };
+
+  const finishDownload = async () => {
     if (dlPollRef.current) {
       clearInterval(dlPollRef.current);
       dlPollRef.current = null;
@@ -438,6 +469,16 @@ export default function MigrationPage() {
     setDownloadJob(null);
     setReview(null);
     setSelectedTrackIds(new Set());
+    // Re-load snapshot + playlists — when the page restores the downloading
+    // view on mount, it returns early WITHOUT loading them. So "Back to wizard"
+    // would land on an empty sidebar + "Loading..." header. Re-fetch here.
+    try {
+      const snap = await loadSnapshot();
+      setSnapshot(snap);
+      await loadPlaylists();
+    } catch {
+      // Keep going — browse view is still usable even if these fail.
+    }
     setView("browse");
   };
 
@@ -777,10 +818,16 @@ export default function MigrationPage() {
                 key={`${p.id}-${p.spotifyId}`}
                 active={selectedPlaylistId === (p.isLiked ? "liked" : String(p.id))}
                 onClick={() => selectPlaylist(p.isLiked ? "liked" : String(p.id))}
+                onMirror={
+                  p.matchedCount > 0
+                    ? () => mirrorPlaylist(p.isLiked ? "liked" : p.id, p.name)
+                    : undefined
+                }
                 icon={p.isLiked ? <Heart className="h-4 w-4 text-pink-400" /> : <Music2 className="h-4 w-4" />}
                 label={p.name}
                 count={p.trackCount}
                 missing={p.missingCount}
+                matched={p.matchedCount}
               />
             ))}
           </CardContent>
@@ -815,6 +862,14 @@ export default function MigrationPage() {
                   onChange={(e) => setDedupe(e.target.checked)}
                 />
                 Dedupe
+              </label>
+              <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={hideMatched}
+                  onChange={(e) => setHideMatched(e.target.checked)}
+                />
+                Hide already in library
               </label>
               <Button variant="outline" size="sm" onClick={selectAllInPlaylist}>
                 Select all visible
@@ -856,7 +911,7 @@ export default function MigrationPage() {
                     key={t.id}
                     className={`flex items-center gap-2 px-3 py-1.5 hover:bg-secondary/30 ${
                       selectedTrackIds.has(t.id) ? "bg-secondary/40" : ""
-                    }`}
+                    } ${t.isMatched ? "border-l-2 border-emerald-400/40" : ""}`}
                   >
                     <input
                       type="checkbox"
@@ -864,18 +919,24 @@ export default function MigrationPage() {
                       onChange={() => toggleTrack(t.id)}
                     />
                     {t.isMatched ? (
-                      <CheckCircle2
-                        className="h-3.5 w-3.5 text-emerald-400 shrink-0"
-                        aria-label="already local"
-                      />
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] shrink-0 text-emerald-400 border-emerald-400/40 px-1.5"
+                        title="Already in your library"
+                      >
+                        <CheckCircle2 className="h-3 w-3 mr-1" /> In library
+                      </Badge>
                     ) : (
-                      <XCircle
-                        className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0"
-                        aria-label="missing"
-                      />
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] shrink-0 text-muted-foreground/60 px-1.5"
+                        title="Not in your library yet"
+                      >
+                        <XCircle className="h-3 w-3 mr-1" /> Missing
+                      </Badge>
                     )}
                     <div className="flex-1 min-w-0 grid grid-cols-[1fr_1fr_1fr] gap-2 text-sm">
-                      <span className="truncate font-medium">{t.title}</span>
+                      <span className={`truncate font-medium ${t.isMatched ? "text-muted-foreground" : ""}`}>{t.title}</span>
                       <span className="truncate text-muted-foreground">{t.artist}</span>
                       <span className="truncate text-muted-foreground">{t.album || ""}</span>
                     </div>
@@ -902,36 +963,56 @@ export default function MigrationPage() {
 function PlaylistButton({
   active,
   onClick,
+  onMirror,
   icon,
   label,
   count,
   missing,
+  matched,
 }: {
   active: boolean;
   onClick: () => void;
+  onMirror?: () => void;
   icon: React.ReactNode;
   label: string;
   count: number;
   missing: number;
+  matched?: number;
 }) {
   return (
-    <button
-      onClick={onClick}
-      className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-left transition ${
+    <div
+      className={`group flex items-center gap-1 px-3 py-2 rounded-md text-sm transition ${
         active ? "bg-primary/15 text-primary" : "hover:bg-secondary/50"
       }`}
     >
-      <span className="shrink-0">{icon}</span>
-      <span className="flex-1 truncate">{label}</span>
-      <span className="text-xs text-muted-foreground shrink-0">
-        {count}
-        {missing > 0 && (
-          <span className="text-amber-400 ml-1" title={`${missing} missing locally`}>
-            ·{missing}
-          </span>
-        )}
-      </span>
-    </button>
+      <button
+        onClick={onClick}
+        className="flex-1 flex items-center gap-2 text-left min-w-0"
+      >
+        <span className="shrink-0">{icon}</span>
+        <span className="flex-1 truncate">{label}</span>
+        <span className="text-xs text-muted-foreground shrink-0">
+          {count}
+          {missing > 0 && (
+            <span className="text-amber-400 ml-1" title={`${missing} missing locally`}>
+              ·{missing}
+            </span>
+          )}
+        </span>
+      </button>
+      {onMirror && matched !== undefined && matched > 0 && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onMirror();
+          }}
+          className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 hover:bg-primary/20 text-emerald-400"
+          title={`Create a Vynl playlist with the ${matched} matched track${matched !== 1 ? "s" : ""}`}
+        >
+          <ListChecks className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
   );
 }
 
