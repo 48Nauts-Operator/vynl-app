@@ -61,7 +61,7 @@ import { formatFileSize } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
 import { useSettingsStore, type FeatureFlags } from "@/store/settings";
-import SpotifyExtractCard from "@/components/spotify/SpotifyExtractCard";
+import SpotifyMigrationCard from "@/components/spotify/SpotifyMigrationCard";
 
 interface AlbumRule {
   id: number;
@@ -970,8 +970,8 @@ export default function SettingsPage() {
         )}
       </Card>
 
-      {/* Spotify Data Extract */}
-      <SpotifyExtractCard />
+      {/* Spotify connect + link to Migration Wizard */}
+      <SpotifyMigrationCard />
 
       <Card>
         <CardHeader className="cursor-pointer select-none" onClick={() => toggle("library")}>
