@@ -9,6 +9,20 @@ export async function GET(request: NextRequest) {
     const genre = request.nextUrl.searchParams.get("genre");
     const search = request.nextUrl.searchParams.get("search")?.trim();
     const limit = request.nextUrl.searchParams.get("limit");
+    // since: "24h" | "7d" | "30d" | "90d" | "all" (default "all")
+    // Filters to albums whose most-recently-added track is within the window.
+    // Uses the same MAX(added_at) the "recent" sort uses.
+    const since = (request.nextUrl.searchParams.get("since") || "all").toLowerCase();
+    const sinceDays =
+      since === "24h" || since === "1d"
+        ? 1
+        : since === "7d"
+          ? 7
+          : since === "30d"
+            ? 30
+            : since === "90d"
+              ? 90
+              : 0;
     // types: comma-separated subset of [albums, compilations, singles].
     // Missing/empty = all three (no filter). All three present = same as
     // missing. Mix freely (e.g. ?types=albums,compilations excludes singles).
@@ -100,6 +114,15 @@ export async function GET(request: NextRequest) {
       if (clauses.length > 0) {
         query += ` HAVING ` + clauses.join(" OR ");
       }
+    }
+
+    // Since-window filter: applied as a HAVING clause so it can use the
+    // grouped MAX(added_at) aggregate. Combines with the type HAVING via AND.
+    if (sinceDays > 0) {
+      const cutoff = `datetime('now', '-${sinceDays} days')`;
+      query += query.includes(" HAVING ")
+        ? ` AND MAX(added_at) >= ${cutoff}`
+        : ` HAVING MAX(added_at) >= ${cutoff}`;
     }
 
     switch (sort) {
