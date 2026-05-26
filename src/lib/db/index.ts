@@ -433,4 +433,48 @@ try {
   `).run();
 } catch { /* already exists */ }
 
+// FireStorage: universal soft-delete sink. See src/lib/delete-service.ts
+// and project memory [[firestorage]]. Forgejo #6561 has the full spec.
+try {
+  sqlite.prepare(`
+    CREATE TABLE IF NOT EXISTS firestorage_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL,
+      origin_action TEXT NOT NULL,
+      origin_path TEXT,
+      origin_table TEXT,
+      origin_row_id INTEGER,
+      storage_path TEXT NOT NULL,
+      metadata_json TEXT,
+      snapshot_json TEXT,
+      status TEXT NOT NULL DEFAULT 'held',
+      size_bytes INTEGER DEFAULT 0,
+      restored_at TEXT,
+      purged_at TEXT,
+      notified_7d_at TEXT,
+      notified_1d_at TEXT
+    )
+  `).run();
+  sqlite.prepare(`CREATE INDEX IF NOT EXISTS idx_firestorage_status ON firestorage_entries(status)`).run();
+  sqlite.prepare(`CREATE INDEX IF NOT EXISTS idx_firestorage_expires ON firestorage_entries(expires_at)`).run();
+} catch { /* already exists */ }
+
+try {
+  sqlite.prepare(`
+    CREATE TABLE IF NOT EXISTS destructive_actions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+      action TEXT NOT NULL,
+      firestorage_entry_id INTEGER,
+      description TEXT NOT NULL,
+      initiator TEXT NOT NULL,
+      result TEXT NOT NULL,
+      error_message TEXT,
+      byte_count INTEGER DEFAULT 0
+    )
+  `).run();
+  sqlite.prepare(`CREATE INDEX IF NOT EXISTS idx_destructive_actions_ts ON destructive_actions(timestamp)`).run();
+} catch { /* already exists */ }
+
 export { schema };

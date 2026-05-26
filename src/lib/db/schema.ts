@@ -497,3 +497,55 @@ export const appSettings = sqliteTable("app_settings", {
 });
 
 export type AppSetting = typeof appSettings.$inferSelect;
+
+// ---------- FireStorage: universal soft-delete sink ----------
+//
+// Every delete in Vynl goes through `src/lib/delete-service.ts` and lands
+// here. Nothing is hard-deleted on first call. Items are held for
+// `retention_days` (default 90), restorable via UI, then auto-purged.
+//
+// See project rule [[no-destruction-without-failsafes]] (RULE #1) and
+// [[firestorage]] in project memory. Forgejo #6561 has the full spec.
+export const firestorageEntries = sqliteTable("firestorage_entries", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+  expiresAt: text("expires_at").notNull(),
+  // 'user_delete' | 'duplicate_clean' | 'spotify_wipe' | 'playlist_delete' | ...
+  originAction: text("origin_action").notNull(),
+  originPath: text("origin_path"),
+  originTable: text("origin_table"),
+  originRowId: integer("origin_row_id"),
+  storagePath: text("storage_path").notNull(),
+  metadataJson: text("metadata_json"),
+  // Full DB row snapshot(s) for restore — JSON-encoded
+  snapshotJson: text("snapshot_json"),
+  // 'held' | 'restored' | 'purged'
+  status: text("status").notNull().default("held"),
+  sizeBytes: integer("size_bytes").default(0),
+  restoredAt: text("restored_at"),
+  purgedAt: text("purged_at"),
+  notified7dAt: text("notified_7d_at"),
+  notified1dAt: text("notified_1d_at"),
+});
+
+// Audit log for every destructive action — delete, restore, purge.
+// Durable, never auto-purged.
+export const destructiveActions = sqliteTable("destructive_actions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  timestamp: text("timestamp").notNull().default(sql`(datetime('now'))`),
+  // 'delete' | 'restore' | 'purge' | 'expiry_purge'
+  action: text("action").notNull(),
+  firestorageEntryId: integer("firestorage_entry_id"),
+  description: text("description").notNull(),
+  // 'ui' | 'expiry_sweeper' — anything other than 'ui' for action='delete'
+  // is a bug per the single-sink rule.
+  initiator: text("initiator").notNull(),
+  // 'success' | 'failed'
+  result: text("result").notNull(),
+  errorMessage: text("error_message"),
+  byteCount: integer("byte_count").default(0),
+});
+
+export type FirestorageEntry = typeof firestorageEntries.$inferSelect;
+export type FirestorageEntryInsert = typeof firestorageEntries.$inferInsert;
+export type DestructiveAction = typeof destructiveActions.$inferSelect;
