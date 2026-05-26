@@ -52,6 +52,7 @@ export default function AlbumsPage() {
   const [albums, setAlbums] = useState<Album[]>([]);
   const [genres, setGenres] = useState<string[]>([]);
   const [sort, setSort] = useState("artist");
+  const [since, setSince] = useState("all");
   const [genre, setGenre] = useState<string | null>(null);
   // Multi-select toggle: each type is independently on/off. All three on
   // by default = show everything (no API filter). Mirrors the visual
@@ -128,6 +129,7 @@ export default function AlbumsPage() {
       const params = new URLSearchParams({ sort });
       if (genre) params.set("genre", genre);
       if (search.trim()) params.set("search", search.trim());
+      if (since && since !== "all") params.set("since", since);
       // Send types only when it's not the default all-three (otherwise
       // omit to let the API skip the HAVING clause entirely).
       if (activeTypes.size > 0 && activeTypes.size < 3) {
@@ -145,7 +147,7 @@ export default function AlbumsPage() {
     // Debounce search input
     const timer = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(timer);
-  }, [sort, genre, search, activeTypes]);
+  }, [sort, genre, search, activeTypes, since]);
 
   const toggleType = (id: AlbumType) => {
     setActiveTypes((prev) => {
@@ -329,6 +331,18 @@ export default function AlbumsPage() {
               <SelectItem value="name">By Name</SelectItem>
               <SelectItem value="year">By Year</SelectItem>
               <SelectItem value="recent">Recently Added</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={since} onValueChange={setSince}>
+            <SelectTrigger className="w-[140px]" title="Show only albums with tracks added in this window">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All time</SelectItem>
+              <SelectItem value="24h">Last 24 hours</SelectItem>
+              <SelectItem value="7d">Last 7 days</SelectItem>
+              <SelectItem value="30d">Last 30 days</SelectItem>
+              <SelectItem value="90d">Last 90 days</SelectItem>
             </SelectContent>
           </Select>
           <div className="flex border border-border rounded-md">
