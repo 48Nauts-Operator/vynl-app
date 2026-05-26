@@ -33,7 +33,9 @@ export async function GET() {
             enabled: !!dbConfig.enabled,
             watchPaths: JSON.parse(dbConfig.watch_paths || "[]"),
             debounceSeconds: dbConfig.debounce_seconds,
-            autoDeleteOnSuccess: !!dbConfig.auto_delete_on_success,
+            // autoDeleteOnSuccess intentionally omitted as of v0.6.30 —
+            // the feature was removed after destroying ~1407 tracks on
+            // 2026-05-26. See project rule no-destruction-without-failsafes.
           }
         : null,
     });
@@ -77,7 +79,8 @@ export async function POST() {
     const result = startWatcher({
       watchPaths,
       debounceSeconds: dbConfig.debounce_seconds,
-      autoDeleteOnSuccess: !!dbConfig.auto_delete_on_success,
+      // autoDeleteOnSuccess REMOVED in v0.6.30 — the watcher never
+      // deletes files under any circumstance now. See [[no-destruction-without-failsafes]].
     });
 
     if (result.success) {
@@ -128,14 +131,19 @@ export async function DELETE() {
   }
 }
 
-/** PUT — save config */
+/** PUT — save config
+ *
+ * NOTE: The autoDeleteOnSuccess body field is IGNORED as of v0.6.30 after
+ * the watcher destroyed ~1407 library tracks on 2026-05-26. The DB column
+ * is forced to 0 on every save; the file-watcher lib ignores it too.
+ * See [[no-destruction-without-failsafes]] in project memory.
+ */
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
     const {
       watchPaths = [],
       debounceSeconds = 10,
-      autoDeleteOnSuccess = true,
     } = body;
 
     if (!Array.isArray(watchPaths)) {
@@ -149,20 +157,19 @@ export async function PUT(request: NextRequest) {
     sqlite
       .prepare(
         `INSERT INTO watcher_config (id, enabled, watch_paths, debounce_seconds, auto_delete_on_success, updated_at)
-         VALUES (1, 0, ?, ?, ?, datetime('now'))
+         VALUES (1, 0, ?, ?, 0, datetime('now'))
          ON CONFLICT(id) DO UPDATE SET
            watch_paths = excluded.watch_paths,
            debounce_seconds = excluded.debounce_seconds,
-           auto_delete_on_success = excluded.auto_delete_on_success,
+           auto_delete_on_success = 0,
            updated_at = datetime('now')`
       )
       .run(
         JSON.stringify(watchPaths),
-        debounceSeconds,
-        autoDeleteOnSuccess ? 1 : 0
+        debounceSeconds
       );
 
-    return NextResponse.json({ saved: true });
+    return NextResponse.json({ saved: true, autoDelete: "permanently disabled — see project rule no-destruction-without-failsafes" });
   } catch (err) {
     return NextResponse.json(
       { error: "Failed to save config", details: String(err) },
