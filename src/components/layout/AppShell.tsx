@@ -16,6 +16,11 @@ const GlobalImportStatus = dynamic(
   { ssr: false }
 );
 
+const StarPrompt = dynamic(
+  () => import("@/components/StarPrompt").then((m) => m.StarPrompt),
+  { ssr: false }
+);
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [showSplash, setShowSplash] = useState(false);
 
@@ -42,6 +47,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
         <PlayerBar />
         <GlobalImportStatus />
+        <StarPrompt />
       </div>
     </TooltipProvider>
   );

@@ -261,7 +261,7 @@ export async function POST(request: NextRequest) {
               const hash = crypto.createHash("md5").update(track.album + track.artist).digest("hex");
               const coverFile = `${hash}.jpg`;
               if (fs.existsSync(path.join(coversDir, coverFile))) {
-                db.update(tracks).set({ coverPath: `/covers/${coverFile}` }).where(sql`${tracks.id} = ${track.id}`).run();
+                db.update(tracks).set({ coverPath: `/api/covers/${coverFile}` }).where(sql`${tracks.id} = ${track.id}`).run();
               }
             }
             skipped++;
@@ -280,7 +280,7 @@ export async function POST(request: NextRequest) {
               const coverFullPath = path.join(coversDir, coverFilename);
 
               fs.writeFileSync(coverFullPath, pic.data);
-              const coverPath = `/covers/${coverFilename}`;
+              const coverPath = `/api/covers/${coverFilename}`;
 
               // Update all tracks for this album
               db.update(tracks)

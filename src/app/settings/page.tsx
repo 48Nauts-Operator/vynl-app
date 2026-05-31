@@ -254,11 +254,12 @@ export default function SettingsPage() {
 
   // File Watcher state
   const [watcherRunning, setWatcherRunning] = useState(false);
+  // autoDeleteOnSuccess REMOVED in v0.6.30 — see project rule
+  // no-destruction-without-failsafes. The watcher never deletes files.
   const [watcherConfig, setWatcherConfig] = useState<{
     watchPaths: string[];
     debounceSeconds: number;
-    autoDeleteOnSuccess: boolean;
-  }>({ watchPaths: [], debounceSeconds: 10, autoDeleteOnSuccess: true });
+  }>({ watchPaths: [], debounceSeconds: 10 });
   const [watcherStatus, setWatcherStatus] = useState<{
     queueLength: number;
     processing: boolean;
@@ -354,7 +355,10 @@ export default function SettingsPage() {
         eventLog: data.eventLog || [],
       });
       if (data.dbConfig) {
-        setWatcherConfig(data.dbConfig);
+        setWatcherConfig({
+          watchPaths: data.dbConfig.watchPaths || [],
+          debounceSeconds: data.dbConfig.debounceSeconds || 10,
+        });
       }
     } catch {}
   };
@@ -2188,8 +2192,8 @@ export default function SettingsPage() {
             </div>
 
             {/* Settings */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
+            <div className="space-y-3">
+              <div className="space-y-1 max-w-xs">
                 <Label className="text-xs">Debounce (seconds)</Label>
                 <Input
                   type="number"
@@ -2204,17 +2208,18 @@ export default function SettingsPage() {
                   }
                 />
               </div>
-              <div className="flex items-center gap-2 pt-4">
-                <Switch
-                  checked={watcherConfig.autoDeleteOnSuccess}
-                  onCheckedChange={(v) =>
-                    setWatcherConfig((prev) => ({
-                      ...prev,
-                      autoDeleteOnSuccess: v,
-                    }))
-                  }
-                />
-                <Label className="text-xs">Auto-delete source on success</Label>
+
+              {/* Auto-delete permanently removed in v0.6.30. The old toggle
+                  destroyed ~1407 library tracks on 2026-05-26. Source files
+                  are now always preserved. */}
+              <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3 text-xs text-muted-foreground">
+                <div className="font-medium text-red-300 mb-1">
+                  Auto-delete: permanently disabled
+                </div>
+                Source folders are never deleted by the watcher. This
+                feature was removed after a destructive bug. All file
+                deletion happens from the dashboard with confirmation
+                and a 30-day Trash recovery window.
               </div>
             </div>
 

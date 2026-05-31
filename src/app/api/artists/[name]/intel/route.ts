@@ -36,15 +36,18 @@ interface MusicBrainzArtist {
   tags?: Array<{ name: string; count: number }>;
 }
 
+const VYNL_USER_AGENT =
+  process.env.VYNL_USER_AGENT || "Vynl/1.0 (https://github.com/vynl)";
+
 const MB_BASE = "https://musicbrainz.org/ws/2";
 const MB_HEADERS = {
   Accept: "application/json",
-  "User-Agent": "Vynl/1.0 (https://github.com/vynl)",
+  "User-Agent": VYNL_USER_AGENT,
 };
 
 const WD_ENDPOINT = "https://query.wikidata.org/sparql";
 const WD_HEADERS = {
-  "User-Agent": "Vynl/1.0 (https://github.com/vynl)",
+  "User-Agent": VYNL_USER_AGENT,
   Accept: "application/sparql-results+json",
 };
 
@@ -109,7 +112,7 @@ async function fetchWikipediaSummary(
   const tryUrl = async (suffix: string) => {
     try {
       const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(suffix)}`;
-      const res = await fetch(url, { headers: { "User-Agent": "Vynl/1.0" } });
+      const res = await fetch(url, { headers: { "User-Agent": VYNL_USER_AGENT } });
       if (!res.ok) return null;
       const data = await res.json();
       return {
@@ -134,7 +137,7 @@ async function fetchWikipediaSummary(
 /** Download artist image from URL and save to public/artists/ */
 async function downloadArtistImage(imageUrl: string, artistName: string): Promise<string | null> {
   try {
-    const res = await fetch(imageUrl, { headers: { "User-Agent": "Vynl/1.0" } });
+    const res = await fetch(imageUrl, { headers: { "User-Agent": VYNL_USER_AGENT } });
     if (!res.ok) return null;
 
     const contentType = res.headers.get("content-type") || "image/jpeg";
@@ -150,7 +153,7 @@ async function downloadArtistImage(imageUrl: string, artistName: string): Promis
     const filename = `${hash}.${ext}`;
     fs.writeFileSync(path.join(artistsDir, filename), buffer);
 
-    return `/artists/${filename}`;
+    return `/api/artist-images/${filename}`;
   } catch {
     return null;
   }
@@ -282,7 +285,7 @@ async function fetchWikipediaChartHits(artistName: string): Promise<ChartHit[]> 
     try {
       const url = `https://en.wikipedia.org/api/rest_v1/page/html/${encodeURIComponent(pageName)}`;
       const res = await fetch(url, {
-        headers: { "User-Agent": "Vynl/1.0" },
+        headers: { "User-Agent": VYNL_USER_AGENT },
         redirect: "follow",
         signal: AbortSignal.timeout(15000),
       });
@@ -296,7 +299,7 @@ async function fetchWikipediaChartHits(artistName: string): Promise<ChartHit[]> 
         if (hrefMatch) {
           const redirectUrl = `https://en.wikipedia.org${hrefMatch[1]}`;
           const res2 = await fetch(redirectUrl, {
-            headers: { "User-Agent": "Vynl/1.0" },
+            headers: { "User-Agent": VYNL_USER_AGENT },
             signal: AbortSignal.timeout(15000),
           });
           if (!res2.ok) continue;

@@ -26,7 +26,11 @@ const AUDIO_EXTENSIONS = new Set([".flac", ".mp3", ".m4a", ".wav", ".ogg"]);
 export interface WatcherConfig {
   watchPaths: string[];
   debounceSeconds: number;
-  autoDeleteOnSuccess: boolean;
+  // NOTE: autoDeleteOnSuccess was REMOVED in v0.6.30 after it destroyed
+  // ~1407 library tracks on 2026-05-26. The watcher MUST NEVER delete
+  // source files under any condition. See [[no-destruction-without-failsafes]].
+  // The DB column auto_delete_on_success stays for backward compat but is
+  // always ignored at the API + lib level.
 }
 
 interface QueueItem {
@@ -118,10 +122,19 @@ function containsAudioFiles(dirPath: string): boolean {
   return false;
 }
 
-/** Remove a directory recursively */
-function rmDir(dirPath: string): void {
-  fs.rmSync(dirPath, { recursive: true, force: true });
-}
+// rmDir() helper REMOVED in v0.6.30.
+//
+// Previously: `function rmDir(dirPath) { fs.rmSync(dirPath, {recursive:true,force:true}); }`
+// — invoked by the autoDeleteOnSuccess code path which destroyed ~1407
+// library tracks on 2026-05-26 when the watcher treated "0 tracks imported
+// but no error" as success and deleted the source folder.
+//
+// Per project rule [[no-destruction-without-failsafes]]: the watcher
+// must never delete files under any condition. All deletion happens
+// via the Dashboard with a 30-day Trash failsafe (task #92).
+//
+// If you find yourself needing to delete files from the watcher, STOP
+// and review the rule. The watcher is observe-and-trigger-import only.
 
 /**
  * Scan a watch path for existing top-level folders.
@@ -309,17 +322,17 @@ async function processQueue(state: WatcherState): Promise<void> {
       logEvent(state, "info", "No new tracks in batch — skipping rescan");
     }
 
-    // ── Delete source folders for successful imports ──
-    if (state.config.autoDeleteOnSuccess) {
-      for (const folderPath of successFolders) {
-        try {
-          if (fs.existsSync(folderPath)) {
-            rmDir(folderPath);
-            logEvent(state, "info", `Deleted source: "${path.basename(folderPath)}"`);
-          }
-        } catch {}
-      }
-    }
+    // ── Source files are ALWAYS preserved ──
+    //
+    // Auto-delete was REMOVED in v0.6.30 after destroying ~1407 library
+    // tracks on 2026-05-26 (watcher treated "0 tracks imported, no error"
+    // as success and deleted the source folder).
+    //
+    // Per project rule [[no-destruction-without-failsafes]]: the watcher
+    // does not delete files under any circumstance. If the user wants
+    // post-import cleanup, that is a separate, deliberate flow with
+    // confirmation + preview + audit log — NOT a side effect of import.
+    void successFolders;
   }
 
   state.processing = false;

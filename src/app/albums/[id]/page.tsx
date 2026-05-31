@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
+import { CoverArt } from "@/components/CoverArt";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -328,17 +329,13 @@ export default function AlbumDetailPage() {
       {/* Hero */}
       <div className="flex gap-6 items-end">
         <div className="relative w-56 h-56 rounded-lg bg-secondary flex items-center justify-center overflow-hidden shrink-0 shadow-2xl group">
-          {album.coverPath ? (
-            <Image
-              src={album.coverPath}
-              alt={album.album}
-              width={224}
-              height={224}
-              className="object-cover w-full h-full"
-            />
-          ) : (
-            <Disc3 className="h-16 w-16 text-muted-foreground" />
-          )}
+          <CoverArt
+            coverPath={album.coverPath}
+            alt={album.album}
+            width={224}
+            height={224}
+            className="w-full h-full"
+          />
           <button
             className="absolute bottom-2 left-2 p-1.5 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/80"
             onClick={() => setShowCoverSearch(true)}

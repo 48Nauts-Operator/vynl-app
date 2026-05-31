@@ -433,4 +433,83 @@ try {
   `).run();
 } catch { /* already exists */ }
 
+// Cover-path rewrite (v0.6.33+). Next.js standalone mode caches its
+// public/ listing at startup, so runtime-added covers return 404 from
+// the static handler. All covers + artist images now flow through
+// /api/covers/[filename] and /api/artist-images/[filename]. This one-time
+// migration rewrites every existing DB row so they hit the API routes.
+// Idempotent — repeated runs are no-ops because the LIKE filters only
+// match the legacy /covers/ and /artists/ prefixes.
+try {
+  const tablesWithCovers = [
+    "tracks",
+    "playlists",
+    "podcasts",
+    "podcast_episodes",
+  ];
+  for (const tbl of tablesWithCovers) {
+    try {
+      sqlite
+        .prepare(
+          `UPDATE ${tbl} SET cover_path = '/api/covers/' || SUBSTR(cover_path, 9)
+           WHERE cover_path LIKE '/covers/%'`
+        )
+        .run();
+    } catch { /* table or column may not exist */ }
+  }
+  try {
+    sqlite
+      .prepare(
+        `UPDATE artist_intel
+         SET local_image_path = '/api/artist-images/' || SUBSTR(local_image_path, 10)
+         WHERE local_image_path LIKE '/artists/%'`
+      )
+      .run();
+  } catch { /* column may not exist */ }
+} catch { /* migration is best-effort; new writes already use the API path */ }
+
+// FireStorage: universal soft-delete sink. See src/lib/delete-service.ts
+// and project memory [[firestorage]]. Forgejo #6561 has the full spec.
+try {
+  sqlite.prepare(`
+    CREATE TABLE IF NOT EXISTS firestorage_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL,
+      origin_action TEXT NOT NULL,
+      origin_path TEXT,
+      origin_table TEXT,
+      origin_row_id INTEGER,
+      storage_path TEXT NOT NULL,
+      metadata_json TEXT,
+      snapshot_json TEXT,
+      status TEXT NOT NULL DEFAULT 'held',
+      size_bytes INTEGER DEFAULT 0,
+      restored_at TEXT,
+      purged_at TEXT,
+      notified_7d_at TEXT,
+      notified_1d_at TEXT
+    )
+  `).run();
+  sqlite.prepare(`CREATE INDEX IF NOT EXISTS idx_firestorage_status ON firestorage_entries(status)`).run();
+  sqlite.prepare(`CREATE INDEX IF NOT EXISTS idx_firestorage_expires ON firestorage_entries(expires_at)`).run();
+} catch { /* already exists */ }
+
+try {
+  sqlite.prepare(`
+    CREATE TABLE IF NOT EXISTS destructive_actions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+      action TEXT NOT NULL,
+      firestorage_entry_id INTEGER,
+      description TEXT NOT NULL,
+      initiator TEXT NOT NULL,
+      result TEXT NOT NULL,
+      error_message TEXT,
+      byte_count INTEGER DEFAULT 0
+    )
+  `).run();
+  sqlite.prepare(`CREATE INDEX IF NOT EXISTS idx_destructive_actions_ts ON destructive_actions(timestamp)`).run();
+} catch { /* already exists */ }
+
 export { schema };

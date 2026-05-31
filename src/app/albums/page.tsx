@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { usePlayerStore } from "@/store/player";
 import { Disc3, Play, Loader2, ImageIcon, Pencil, LayoutGrid, List, Archive, ListPlus, Search, X } from "lucide-react";
+import { CoverArt } from "@/components/CoverArt";
 import { motion } from "framer-motion";
 import { CoverSearchDialog } from "@/components/albums/CoverSearchDialog";
 import { GenreFilter } from "@/components/GenreFilter";
@@ -53,7 +54,29 @@ export default function AlbumsPage() {
   const [genres, setGenres] = useState<string[]>([]);
   const [sort, setSort] = useState("artist");
   const [since, setSince] = useState("all");
-  const [genre, setGenre] = useState<string | null>(null);
+  // Selected genre persists to localStorage so that navigating into an
+  // album and back via the browser/back-button doesn't reset to "All
+  // genres". Same pattern as activeTypes below.
+  const GENRE_STORAGE_KEY = "vynl:albums:genre";
+  const [genre, setGenre] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem(GENRE_STORAGE_KEY);
+      return raw && raw !== "null" ? raw : null;
+    } catch {
+      return null;
+    }
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (genre) {
+        window.localStorage.setItem(GENRE_STORAGE_KEY, genre);
+      } else {
+        window.localStorage.removeItem(GENRE_STORAGE_KEY);
+      }
+    } catch { /* quota / privacy mode — ignore */ }
+  }, [genre]);
   // Multi-select toggle: each type is independently on/off. All three on
   // by default = show everything (no API filter). Mirrors the visual
   // "On Air" buttons. Persisted to localStorage so navigating away and
@@ -392,17 +415,11 @@ export default function AlbumsPage() {
                   <Card className="hover:bg-secondary/50 transition-colors cursor-pointer group">
                     <CardContent className="p-4">
                       <div className="aspect-square rounded-lg bg-secondary mb-3 flex items-center justify-center overflow-hidden relative">
-                        {album.cover_path ? (
-                          <Image
-                            src={album.cover_path}
-                            alt={album.album}
-                            fill
-                            sizes="256px"
-                            className="object-cover"
-                          />
-                        ) : (
-                          <Disc3 className="h-10 w-10 text-muted-foreground" />
-                        )}
+                        <CoverArt
+                          coverPath={album.cover_path}
+                          alt={album.album}
+                          fill
+                        />
                         {album.is_compilation === 1 && (
                           <span
                             className="absolute top-2 left-2 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded text-[#fdf4ff] bg-black/60 backdrop-blur-sm border border-[#a855f7]/60 shadow-[0_0_8px_rgba(236,72,153,0.5)]"
@@ -468,17 +485,11 @@ export default function AlbumsPage() {
                 >
                   <div className="flex items-center gap-3 p-2 rounded-lg hover:bg-secondary/50 transition-colors cursor-pointer group">
                     <div className="h-12 w-12 rounded bg-secondary flex items-center justify-center overflow-hidden relative shrink-0">
-                      {album.cover_path ? (
-                        <Image
-                          src={album.cover_path}
-                          alt={album.album}
-                          fill
-                          sizes="48px"
-                          className="object-cover"
-                        />
-                      ) : (
-                        <Disc3 className="h-5 w-5 text-muted-foreground" />
-                      )}
+                      <CoverArt
+                        coverPath={album.cover_path}
+                        alt={album.album}
+                        fill
+                      />
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="font-medium truncate text-sm flex items-center gap-1.5">

@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
         const filename = `playlist-${playlist.id}.png`;
         fs.writeFileSync(path.join(coversDir, filename), buffer);
         db.update(playlists)
-          .set({ coverPath: `/covers/${filename}` })
+          .set({ coverPath: `/api/covers/${filename}` })
           .where(eq(playlists.id, playlist.id))
           .run();
       } catch (err) {

@@ -37,7 +37,11 @@ export async function POST(request: NextRequest) {
     const filename = `${hash}.${ext}`;
     fs.writeFileSync(path.join(coversDir, filename), buffer);
 
-    const coverPath = `/covers/${filename}`;
+    // Served via the /api/covers/[filename] route, not the static /public
+    // handler — Next.js standalone mode caches the public/ listing at
+    // startup and ignores runtime-added files. See
+    // src/app/api/covers/[filename]/route.ts for the bypass.
+    const coverPath = `/api/covers/${filename}`;
 
     // Update all tracks for this album
     if (albumArtist) {

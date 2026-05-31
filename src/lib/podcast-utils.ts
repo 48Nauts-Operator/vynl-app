@@ -123,7 +123,7 @@ export async function downloadCoverArt(
       await downloadFile(coverUrl, fullPath);
     }
 
-    return `/covers/${filename}`;
+    return `/api/covers/${filename}`;
   } catch {
     return null;
   }
