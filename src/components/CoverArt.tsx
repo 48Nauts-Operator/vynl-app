@@ -3,14 +3,20 @@
 /**
  * CoverArt — single fallback for any image slot that may not have artwork yet.
  *
- * When coverPath is set, renders the Next.js Image. Otherwise renders the
- * Vynl Dragon DJ logo (public/logo-main.png) so the UI never shows an empty
- * disc / muted music icon. The logo is brand-on, looks intentional, and at
- * small sizes still reads as "this is an album with no cover yet."
+ * Renders the cover when present + loadable. Falls back to the Vynl Dragon DJ
+ * logo (public/logo-main.png) in two cases:
+ *   1. coverPath is null/empty
+ *   2. coverPath is set but the image fails to load (404, network error,
+ *      file removed from disk while DB still references it)
+ *
+ * Case 2 matters for local-dev environments where the DB has paths to
+ * cover files that only exist on the production NAS, and for any
+ * post-delete cleanup race where the file disappears before the row.
  *
  * Use this anywhere you would have done `coverPath ? <Image .../> : <Disc3 />`.
  */
 import Image from "next/image";
+import { useState, useEffect } from "react";
 
 interface Props {
   coverPath: string | null | undefined;
@@ -37,8 +43,16 @@ export function CoverArt({
   className,
   dim,
 }: Props) {
-  const src = coverPath || "/logo-main.png";
-  const isFallback = !coverPath;
+  const [errored, setErrored] = useState(false);
+  // Reset error state when coverPath changes — a row re-render with a new
+  // path should try the new image, not stay stuck on the dragon.
+  useEffect(() => {
+    setErrored(false);
+  }, [coverPath]);
+
+  const useFallback = !coverPath || errored;
+  const src = useFallback ? "/logo-main.png" : (coverPath as string);
+  const isFallback = useFallback;
 
   // Compose dim style for the fallback only — real covers always render at
   // full strength.
@@ -47,11 +61,20 @@ export function CoverArt({
       ? "opacity-80 mix-blend-screen"
       : "";
 
+  // Skip Next.js image optimization. Covers are already hash-named files
+  // at fixed sizes; the optimizer's /_next/image proxy was returning 400 for
+  // these same-origin API URLs and there's no resize/format gain to lose.
+  const commonProps = {
+    src,
+    alt,
+    onError: () => setErrored(true),
+    unoptimized: true as const,
+  };
+
   if (fill) {
     return (
       <Image
-        src={src}
-        alt={alt}
+        {...commonProps}
         fill
         className={`object-cover ${dimStyle} ${className || ""}`.trim()}
         sizes="(max-width: 768px) 50vw, 25vw"
@@ -61,8 +84,7 @@ export function CoverArt({
 
   return (
     <Image
-      src={src}
-      alt={alt}
+      {...commonProps}
       width={width || 224}
       height={height || 224}
       className={`object-cover ${dimStyle} ${className || ""}`.trim()}
