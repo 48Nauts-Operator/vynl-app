@@ -333,7 +333,7 @@ async function runFetchArtwork() {
           const hash = crypto.createHash("md5").update(album.album + album.album_artist).digest("hex");
           const coverFilename = `${hash}.${fmt === "jpeg" ? "jpg" : fmt}`;
           fs.writeFileSync(path.join(coversDir, coverFilename), pic.data);
-          const coverPath = `/covers/${coverFilename}`;
+          const coverPath = `/api/covers/${coverFilename}`;
 
           // Update all tracks for this album
           for (const tid of trackIds) {
@@ -370,7 +370,7 @@ async function runFetchArtwork() {
           // bytes anyway.
           const filename = `${hash}.jpg`;
           fs.writeFileSync(path.join(coversDir, filename), buffer);
-          const coverPath = `/covers/${filename}`;
+          const coverPath = `/api/covers/${filename}`;
 
           for (const tid of trackIds) {
             sqlite.prepare(`UPDATE tracks SET cover_path = ? WHERE id = ?`).run(coverPath, tid);

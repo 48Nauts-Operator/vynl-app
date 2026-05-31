@@ -433,6 +433,41 @@ try {
   `).run();
 } catch { /* already exists */ }
 
+// Cover-path rewrite (v0.6.33+). Next.js standalone mode caches its
+// public/ listing at startup, so runtime-added covers return 404 from
+// the static handler. All covers + artist images now flow through
+// /api/covers/[filename] and /api/artist-images/[filename]. This one-time
+// migration rewrites every existing DB row so they hit the API routes.
+// Idempotent — repeated runs are no-ops because the LIKE filters only
+// match the legacy /covers/ and /artists/ prefixes.
+try {
+  const tablesWithCovers = [
+    "tracks",
+    "playlists",
+    "podcasts",
+    "podcast_episodes",
+  ];
+  for (const tbl of tablesWithCovers) {
+    try {
+      sqlite
+        .prepare(
+          `UPDATE ${tbl} SET cover_path = '/api/covers/' || SUBSTR(cover_path, 9)
+           WHERE cover_path LIKE '/covers/%'`
+        )
+        .run();
+    } catch { /* table or column may not exist */ }
+  }
+  try {
+    sqlite
+      .prepare(
+        `UPDATE artist_intel
+         SET local_image_path = '/api/artist-images/' || SUBSTR(local_image_path, 10)
+         WHERE local_image_path LIKE '/artists/%'`
+      )
+      .run();
+  } catch { /* column may not exist */ }
+} catch { /* migration is best-effort; new writes already use the API path */ }
+
 // FireStorage: universal soft-delete sink. See src/lib/delete-service.ts
 // and project memory [[firestorage]]. Forgejo #6561 has the full spec.
 try {

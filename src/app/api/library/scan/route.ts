@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
           if (!fs.existsSync(coverFullPath)) {
             fs.writeFileSync(coverFullPath, track.coverData.data);
           }
-          coverPath = `/covers/${coverFilename}`;
+          coverPath = `/api/covers/${coverFilename}`;
         }
 
         db.insert(tracks)
