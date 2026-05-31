@@ -15,7 +15,14 @@ import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 
-const COVERS_DIR = process.env.VYNL_COVERS_DIR || "/app/public/covers";
+// Resolve covers dir relative to wherever the server is started from.
+// In Docker: process.cwd() = /app, so this resolves to /app/public/covers.
+// In `npm run dev`: process.cwd() = project root, so it resolves to
+// <project>/public/covers. Same default, both environments. Env var
+// override stays available.
+const COVERS_DIR =
+  process.env.VYNL_COVERS_DIR ||
+  path.join(process.cwd(), "public", "covers");
 
 const MIME: Record<string, string> = {
   ".jpg": "image/jpeg",

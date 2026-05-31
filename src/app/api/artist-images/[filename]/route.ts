@@ -10,7 +10,11 @@ import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 
-const ARTISTS_DIR = process.env.VYNL_ARTISTS_DIR || "/app/public/artists";
+// Same cwd-based default as /api/covers — works in both Docker and
+// `npm run dev` without an env var override.
+const ARTISTS_DIR =
+  process.env.VYNL_ARTISTS_DIR ||
+  path.join(process.cwd(), "public", "artists");
 
 const MIME: Record<string, string> = {
   ".jpg": "image/jpeg",
