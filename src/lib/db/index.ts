@@ -512,4 +512,25 @@ try {
   sqlite.prepare(`CREATE INDEX IF NOT EXISTS idx_destructive_actions_ts ON destructive_actions(timestamp)`).run();
 } catch { /* already exists */ }
 
+// Manual metadata editing (v0.6.39+): sticky-overrides column on tracks
+// + audit-log table. See plan + Forgejo task #94.
+try { sqlite.prepare(`ALTER TABLE tracks ADD COLUMN user_overridden_fields TEXT`).run(); } catch { /* already exists */ }
+
+try {
+  sqlite.prepare(`
+    CREATE TABLE IF NOT EXISTS metadata_edits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+      field_name TEXT NOT NULL,
+      old_value TEXT,
+      new_value TEXT,
+      edit_batch_id TEXT,
+      edited_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  sqlite.prepare(`CREATE INDEX IF NOT EXISTS idx_metadata_edits_track ON metadata_edits(track_id)`).run();
+  sqlite.prepare(`CREATE INDEX IF NOT EXISTS idx_metadata_edits_batch ON metadata_edits(edit_batch_id)`).run();
+  sqlite.prepare(`CREATE INDEX IF NOT EXISTS idx_metadata_edits_at ON metadata_edits(edited_at)`).run();
+} catch { /* already exists */ }
+
 export { schema };

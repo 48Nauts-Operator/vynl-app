@@ -34,6 +34,11 @@ export const tracks = sqliteTable("tracks", {
   // the Singles filter on the Albums page (single + EP if track_count
   // <= 4, fallback to count heuristic when missing).
   albumType: text("album_type"),
+  // JSON array of field names the user has manually edited via the
+  // Library-editing feature (title / artist / album / album_artist /
+  // genre / year). Beets sync MUST NOT overwrite these fields — the
+  // user's intent is sticky. See [[manual-metadata-edit]] feature plan.
+  userOverriddenFields: text("user_overridden_fields"),
 });
 
 export const playlists = sqliteTable("playlists", {
@@ -549,3 +554,32 @@ export const destructiveActions = sqliteTable("destructive_actions", {
 export type FirestorageEntry = typeof firestorageEntries.$inferSelect;
 export type FirestorageEntryInsert = typeof firestorageEntries.$inferInsert;
 export type DestructiveAction = typeof destructiveActions.$inferSelect;
+
+// ---------- Manual metadata edits (audit log) ----------
+//
+// Every manual edit made via the Library-editing feature (Settings →
+// Library editing toggle) writes a row here. Track-level edits get
+// one row per changed field. Album-scope edits get one row per
+// (track × changed field) sharing the same editBatchId so the UI can
+// group them.
+//
+// v1 ships with audit-only UI (history popover). v2 will add a revert
+// button that reads oldValue from this table — schema is forward-compatible.
+//
+// See [[manual-metadata-edit]] plan + Forgejo issue when filed.
+export const metadataEdits = sqliteTable("metadata_edits", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  trackId: integer("track_id")
+    .notNull()
+    .references(() => tracks.id, { onDelete: "cascade" }),
+  // 'title' | 'artist' | 'album' | 'album_artist' | 'genre' | 'year'
+  fieldName: text("field_name").notNull(),
+  oldValue: text("old_value"),
+  newValue: text("new_value"),
+  // Groups rows from a single album-scope edit. NULL for track-only edits.
+  editBatchId: text("edit_batch_id"),
+  editedAt: text("edited_at").notNull().default(sql`(datetime('now'))`),
+});
+
+export type MetadataEdit = typeof metadataEdits.$inferSelect;
+export type MetadataEditInsert = typeof metadataEdits.$inferInsert;
