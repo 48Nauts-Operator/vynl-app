@@ -55,6 +55,7 @@ import {
   FolderSearch,
   Disc3,
   User,
+  Pencil,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatFileSize } from "@/lib/utils";
@@ -131,6 +132,35 @@ export default function SettingsPage() {
   const [apiKeys, setApiKeys] = useState<Record<string, ApiKeyMeta>>({});
   const [apiKeyDrafts, setApiKeyDrafts] = useState<Record<string, string>>({});
   const [apiKeySavedFlags, setApiKeySavedFlags] = useState<Record<string, boolean>>({});
+
+  // Manual metadata editing toggle (task #94). Default off — must be
+  // explicitly enabled before the edit affordances appear on album pages.
+  const [manualEditEnabled, setManualEditEnabled] = useState(false);
+  const [manualEditSaving, setManualEditSaving] = useState(false);
+  const loadManualEditFlag = useCallback(async () => {
+    try {
+      const res = await fetch("/api/settings/features");
+      const data = await res.json();
+      setManualEditEnabled(Boolean(data.features?.manualEdit?.enabled));
+    } catch {}
+  }, []);
+  const toggleManualEdit = useCallback(async (next: boolean) => {
+    setManualEditSaving(true);
+    setManualEditEnabled(next); // optimistic
+    try {
+      await fetch("/api/settings/features", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "manualEdit", enabled: next }),
+      });
+    } catch {
+      // Revert on error
+      setManualEditEnabled(!next);
+    } finally {
+      setManualEditSaving(false);
+    }
+  }, []);
+  useEffect(() => { loadManualEditFlag(); }, [loadManualEditFlag]);
 
   const loadApiKeys = useCallback(async () => {
     try {
@@ -1009,6 +1039,50 @@ export default function SettingsPage() {
                 Used for Sonos to reach back to Vynl for audio streaming
               </p>
             </div>
+          </CardContent>
+        )}
+      </Card>
+
+      {/* Library editing — gated metadata edit feature (task #94). When
+          off, the 3-dot menu on tracks + albums doesn't show any edit
+          affordances. Audit log + override-stickiness are independent of
+          this flag (edits stay logged, beets sync still respects overrides
+          even if the flag is later turned off). */}
+      <Card>
+        <CardHeader className="cursor-pointer select-none" onClick={() => toggle("libraryEditing")}>
+          <CardTitle className="flex items-center gap-2">
+            <Pencil className="h-5 w-5" />
+            Library Editing
+            <ChevronDown className={`h-4 w-4 ml-auto transition-transform ${isOpen("libraryEditing") ? "" : "-rotate-90"}`} />
+          </CardTitle>
+        </CardHeader>
+        {isOpen("libraryEditing") && (
+          <CardContent>
+            <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/10 border border-border">
+              <div className="min-w-0 mr-4">
+                <p className="text-sm font-medium">Allow metadata editing</p>
+                <p className="text-xs text-muted-foreground">
+                  When on, the 3-dot menu on tracks and albums shows
+                  &quot;Edit metadata&quot; actions for title, artist, album,
+                  year, and genre. Every edit is logged and can be reviewed.
+                  Off by default to prevent accidental changes.
+                </p>
+              </div>
+              <Switch
+                checked={manualEditEnabled}
+                onCheckedChange={toggleManualEdit}
+                disabled={manualEditSaving}
+              />
+            </div>
+            {manualEditEnabled && (
+              <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-muted-foreground">
+                <div className="font-medium text-amber-300 mb-1">Edits are sticky</div>
+                Once you edit a field, beets sync will NOT overwrite it even
+                if beets has a different value. Use the &quot;Edit history&quot;
+                action on a track to see all changes. v1 has no revert button —
+                fix mistakes by editing again.
+              </div>
+            )}
           </CardContent>
         )}
       </Card>
