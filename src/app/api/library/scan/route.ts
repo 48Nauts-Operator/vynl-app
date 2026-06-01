@@ -5,9 +5,37 @@ import { FilesystemAdapter } from "@/lib/adapters/filesystem-adapter";
 import { BeetsAdapter } from "@/lib/adapters/beets-adapter";
 import { MusicSourceAdapter } from "@/lib/adapters/types";
 import { reconcileWishlist } from "@/lib/wishlist-reconciler";
+import { eq } from "drizzle-orm";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
+
+// Map from DB column name (as stored in tracks.user_overridden_fields)
+// to the camelCase Drizzle key used in the upsert object. Used to skip
+// fields the user has manually edited so beets/scan never overwrites.
+const OVERRIDE_DB_TO_DRIZZLE: Record<string, string> = {
+  title: "title",
+  artist: "artist",
+  album: "album",
+  album_artist: "albumArtist",
+  genre: "genre",
+  year: "year",
+};
+
+function parseOverrides(raw: string | null | undefined): Set<string> {
+  if (!raw) return new Set();
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(
+      parsed
+        .filter((s) => typeof s === "string" && s in OVERRIDE_DB_TO_DRIZZLE)
+        .map((s) => OVERRIDE_DB_TO_DRIZZLE[s])
+    );
+  } catch {
+    return new Set();
+  }
+}
 
 export async function POST(request: NextRequest) {
   const libraryPath = process.env.MUSIC_LIBRARY_PATH;
@@ -88,6 +116,45 @@ export async function POST(request: NextRequest) {
           coverPath = `/api/covers/${coverFilename}`;
         }
 
+        // Pre-fetch existing row (if any) to see which fields the user
+        // has manually overridden. Adds one SELECT per upsert; for 15K
+        // tracks ~3-4s of extra time on a full rescan, worth it to
+        // preserve user edits per task #94.
+        const existing = db
+          .select({ overrides: tracks.userOverriddenFields })
+          .from(tracks)
+          .where(eq(tracks.filePath, track.filePath))
+          .get();
+        const overrides = parseOverrides(existing?.overrides);
+
+        // Build the UPDATE set object, skipping any field the user has
+        // edited manually. The INSERT branch always writes everything —
+        // it's a brand-new row, no overrides to preserve.
+        type UpdateSet = Record<string, unknown>;
+        const baseUpdate: UpdateSet = {
+          title: track.title,
+          artist: track.artist,
+          album: track.album,
+          albumArtist: track.albumArtist,
+          genre: track.genre,
+          year: track.year,
+          trackNumber: track.trackNumber,
+          discNumber: track.discNumber,
+          duration: track.duration,
+          fileSize: track.fileSize,
+          format: track.format,
+          bitrate: track.bitrate,
+          sampleRate: track.sampleRate,
+          isrc: track.isrc,
+          isCompilation: track.isCompilation ?? false,
+          coverPath,
+        };
+        const filteredUpdate: UpdateSet = {};
+        for (const [k, v] of Object.entries(baseUpdate)) {
+          if (overrides.has(k)) continue;
+          filteredUpdate[k] = v;
+        }
+
         db.insert(tracks)
           .values({
             title: track.title,
@@ -111,24 +178,9 @@ export async function POST(request: NextRequest) {
           })
           .onConflictDoUpdate({
             target: tracks.filePath,
-            set: {
-              title: track.title,
-              artist: track.artist,
-              album: track.album,
-              albumArtist: track.albumArtist,
-              genre: track.genre,
-              year: track.year,
-              trackNumber: track.trackNumber,
-              discNumber: track.discNumber,
-              duration: track.duration,
-              fileSize: track.fileSize,
-              format: track.format,
-              bitrate: track.bitrate,
-              sampleRate: track.sampleRate,
-              isrc: track.isrc,
-              isCompilation: track.isCompilation ?? false,
-              coverPath,
-            },
+            // Drizzle's set type is the full track row shape; we're passing
+            // a filtered subset which is structurally valid at runtime.
+            set: filteredUpdate as never,
           })
           .run();
 

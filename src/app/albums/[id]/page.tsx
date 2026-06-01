@@ -16,13 +16,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { usePlayerStore, Track as PlayerTrack } from "@/store/player";
-import { Play, Pause, Shuffle, Disc3, Loader2, Clock, ImageIcon, Pencil, Archive, ListPlus, Star, ChevronsUpDown, ChevronUp, ChevronDown, ArrowLeft } from "lucide-react";
+import { Play, Pause, Shuffle, Disc3, Loader2, Clock, ImageIcon, Pencil, Archive, ListPlus, Star, ChevronsUpDown, ChevronUp, ChevronDown, ArrowLeft, MoreVertical, History } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatDuration } from "@/lib/utils";
 import { CoverSearchDialog } from "@/components/albums/CoverSearchDialog";
 import { AddToPlaylistDialog } from "@/components/playlists/AddToPlaylistDialog";
 import { VinylRating } from "@/components/ui/VinylRating";
 import { TrackActionsMenu } from "@/components/tracks/TrackActionsMenu";
+import { EditMetadataDialog } from "@/components/library/EditMetadataDialog";
+import { EditAlbumMetadataDialog } from "@/components/library/EditAlbumMetadataDialog";
+import { EditHistoryPopover } from "@/components/library/EditHistoryPopover";
 
 interface AlbumTrack {
   id: number;
@@ -119,6 +122,22 @@ export default function AlbumDetailPage() {
   // Archive
   const [archiving, setArchiving] = useState<AlbumTrack | null>(null);
   const [archiveLoading, setArchiveLoading] = useState(false);
+
+  // Manual metadata editing (task #94). Off by default — controlled by
+  // Settings → Library Editing. Determines whether "Edit metadata" + "Edit
+  // history" items render in the track context menu + album hero menu.
+  const [manualEditEnabled, setManualEditEnabled] = useState(false);
+  const [editingTrack, setEditingTrack] = useState<AlbumTrack | null>(null);
+  const [historyTrack, setHistoryTrack] = useState<AlbumTrack | null>(null);
+  const [editingAlbum, setEditingAlbum] = useState(false);
+  const [showAlbumMenu, setShowAlbumMenu] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/settings/features")
+      .then((r) => r.json())
+      .then((d) => setManualEditEnabled(Boolean(d.features?.manualEdit?.enabled)))
+      .catch(() => {});
+  }, []);
 
   // Add to playlist
   const [playlistTrackIds, setPlaylistTrackIds] = useState<number[]>([]);
@@ -396,16 +415,54 @@ export default function AlbumDetailPage() {
               </span>
             </div>
           )}
-          <div className="flex gap-3 pt-2">
+          <div className="flex gap-3 pt-2 items-center">
             <Button onClick={playAll}>
               <Play className="h-4 w-4 mr-2" /> Play All
             </Button>
             <Button variant="outline" onClick={shufflePlay}>
               <Shuffle className="h-4 w-4 mr-2" /> Shuffle
             </Button>
+            {manualEditEnabled && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={(e) => {
+                  const rect = (e.target as HTMLElement).getBoundingClientRect();
+                  setShowAlbumMenu({ x: rect.left, y: rect.bottom + 4 });
+                }}
+                title="Album actions"
+              >
+                <MoreVertical className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Album-level actions menu (when manualEdit is on) */}
+      {showAlbumMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setShowAlbumMenu(null)}
+          />
+          <div
+            className="fixed z-50 min-w-[200px] rounded-md border border-border bg-popover p-1 shadow-md animate-in fade-in-0 zoom-in-95"
+            style={{ left: showAlbumMenu.x, top: showAlbumMenu.y }}
+          >
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+              onClick={() => {
+                setEditingAlbum(true);
+                setShowAlbumMenu(null);
+              }}
+            >
+              <Pencil className="h-4 w-4" />
+              Edit album metadata…
+            </button>
+          </div>
+        </>
+      )}
 
       {/* Tracklist */}
       <Card>
@@ -553,6 +610,30 @@ export default function AlbumDetailPage() {
             <Pencil className="h-4 w-4" />
             Rename Track
           </button>
+          {manualEditEnabled && (
+            <>
+              <button
+                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+                onClick={() => {
+                  setEditingTrack(trackMenu.track);
+                  setTrackMenu(null);
+                }}
+              >
+                <Pencil className="h-4 w-4" />
+                Edit metadata…
+              </button>
+              <button
+                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+                onClick={() => {
+                  setHistoryTrack(trackMenu.track);
+                  setTrackMenu(null);
+                }}
+              >
+                <History className="h-4 w-4" />
+                Edit history
+              </button>
+            </>
+          )}
           <button
             className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
             onClick={() => {
@@ -655,6 +736,57 @@ export default function AlbumDetailPage() {
         onOpenChange={setShowPlaylistDialog}
         trackIds={playlistTrackIds}
       />
+
+      {/* Manual metadata edit dialogs — feature flag gates the menu items,
+          but the dialog components themselves are always mounted so the
+          state transitions stay clean. Each is invisible until its trigger
+          state is set. */}
+      {editingTrack && (
+        <EditMetadataDialog
+          open={!!editingTrack}
+          onOpenChange={(o) => !o && setEditingTrack(null)}
+          track={editingTrack}
+          onSaved={() => {
+            // Refetch the album to pick up changes
+            const id = decodeURIComponent(String(params.id));
+            fetch(`/api/albums/${encodeURIComponent(id)}`)
+              .then((r) => r.json())
+              .then((d) => d.album && setAlbum(d.album))
+              .catch(() => {});
+          }}
+          onOpenHistory={() => setHistoryTrack(editingTrack)}
+        />
+      )}
+      {historyTrack && (
+        <EditHistoryPopover
+          open={!!historyTrack}
+          onOpenChange={(o) => !o && setHistoryTrack(null)}
+          trackId={historyTrack.id}
+          trackLabel={`${historyTrack.title} — ${historyTrack.artist}`}
+        />
+      )}
+      {editingAlbum && album && (
+        <EditAlbumMetadataDialog
+          open={editingAlbum}
+          onOpenChange={setEditingAlbum}
+          albumId={String(params.id)}
+          album={{
+            album: album.album,
+            albumArtist: album.albumArtist,
+            year: album.year,
+            genre: album.genre,
+            trackCount: album.trackCount,
+          }}
+          onSaved={() => {
+            // Refetch the album view after a bulk edit
+            const id = decodeURIComponent(String(params.id));
+            fetch(`/api/albums/${encodeURIComponent(id)}`)
+              .then((r) => r.json())
+              .then((d) => d.album && setAlbum(d.album))
+              .catch(() => {});
+          }}
+        />
+      )}
     </div>
   );
 }
