@@ -95,27 +95,73 @@ say "Platform: $PLATFORM ($OS/$ARCH)"
 [[ "$USE_HOST_NETWORK" == "yes" ]] && say "Using host networking (Sonos discovery enabled)"
 
 # ── 2. check Docker ──────────────────────────────────────────────────
+# Vynl deliberately does NOT install Docker for you. Docker is the
+# platform — your OS or your NAS already has a preferred way to install
+# it (apt, App Center, Docker Desktop, etc.). Touching system packages
+# from this script creates ongoing OS-update fragility. Vynl runs
+# entirely inside containers + named volumes; once Docker is present,
+# nothing else on your system is touched.
+#
+# So: detect, point at the right install path for this OS, exit clean.
 if ! command -v docker >/dev/null 2>&1; then
-  if [[ "$OS" == "linux" ]]; then
-    warn "Docker not found. Installing via get.docker.com..."
-    say "(this prompts for sudo)"
-    curl -fsSL https://get.docker.com | sudo sh
-    sudo systemctl enable --now docker 2>/dev/null || true
-    sudo usermod -aG docker "$USER"
-    warn "You may need to log out + back in for the docker group to take effect."
-    warn "If the next step fails with a permissions error, do that now and re-run this script."
-  else
-    die "Docker Desktop is required. Install from: https://www.docker.com/products/docker-desktop/
-After installing + launching Docker Desktop, re-run this script."
-  fi
+  case "$OS" in
+    macos)
+      die "Docker Desktop is not installed.
+
+  1. Download from: https://www.docker.com/products/docker-desktop/
+  2. Open the .dmg, drag Docker to Applications, launch it
+  3. Wait for the whale icon in the menu bar to be steady
+  4. Re-run this script"
+      ;;
+    linux)
+      # Detect distro family so we can give the right command, not a generic shrug
+      DISTRO_HINT=""
+      if [[ -f /etc/rpi-issue ]] || grep -qi "raspberry" /etc/os-release 2>/dev/null; then
+        DISTRO_HINT="  curl -fsSL https://get.docker.com | sudo sh
+  sudo usermod -aG docker \$USER  &&  newgrp docker"
+      elif [[ -f /etc/debian_version ]]; then
+        DISTRO_HINT="  sudo apt-get update && sudo apt-get install -y docker.io docker-compose-plugin
+  sudo usermod -aG docker \$USER  &&  newgrp docker"
+      elif [[ -f /etc/redhat-release ]]; then
+        DISTRO_HINT="  sudo dnf install -y docker docker-compose
+  sudo systemctl enable --now docker
+  sudo usermod -aG docker \$USER  &&  newgrp docker"
+      else
+        DISTRO_HINT="  curl -fsSL https://get.docker.com | sudo sh
+  sudo usermod -aG docker \$USER  &&  newgrp docker"
+      fi
+      die "Docker is not installed.
+
+Install it with:
+$DISTRO_HINT
+
+Then re-run this script."
+      ;;
+  esac
 fi
 
+# Docker is installed — confirm the daemon is reachable. We don't try to
+# start it for you; on macOS that's Docker Desktop's job, on Linux it's
+# the init system's. Just tell you clearly what to do.
 if ! docker info >/dev/null 2>&1; then
-  if [[ "$OS" == "macos" ]]; then
-    die "Docker Desktop is installed but not running. Launch it (Spotlight → Docker), wait for the whale icon to be steady, then re-run this script."
-  else
-    die "Docker daemon isn't running. Start it: sudo systemctl start docker"
-  fi
+  case "$OS" in
+    macos)
+      die "Docker Desktop is installed but not running. Launch it (Spotlight → Docker), wait for the whale icon in the menu bar to be steady, then re-run this script."
+      ;;
+    linux)
+      RUN_USER="${USER:-$(id -un)}"
+      # Group-perm issue is the most common silent failure
+      if [[ "$(id -u)" != "0" ]] && ! groups "$RUN_USER" 2>/dev/null | grep -q '\bdocker\b'; then
+        die "Your user '$RUN_USER' isn't in the docker group, so Docker won't talk to you.
+  sudo usermod -aG docker $RUN_USER  &&  newgrp docker
+Then re-run this script."
+      fi
+      die "Docker daemon isn't running. Start it:
+  sudo systemctl start docker     (systemd-based distros)
+  sudo service docker start       (sysv-init / NAS firmware)
+Then re-run this script."
+      ;;
+  esac
 fi
 ok "Docker is running"
 
